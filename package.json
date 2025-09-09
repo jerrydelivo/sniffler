@@ -1,0 +1,170 @@
+{
+  "name": "sniffler",
+  "version": "1.0.0",
+  "description": "Cross-platform Electron desktop app for developers/testers, inspired by Postman, focused on real-time request sniffing, mocking, and regression testing for back-end APIs.",
+  "main": "index.js",
+  "author": {
+    "name": "Sniffle Team",
+    "email": "team@sniffle.dev"
+  },
+  "homepage": "https://github.com/user/Sniffler",
+  "scripts": {
+    "dev": "concurrently \"npm run dev --workspace=apps/renderer\" \"npm run start --workspace=apps/main\"",
+    "dev:test-server": "cd ../test-server && npm run dev",
+    "build": "npm run build --workspace=apps/renderer",
+    "start": "npm run start --workspace=apps/main",
+    "dist": "npm run build && npx electron-builder --publish=never",
+    "test": "node tests/run-tests.js",
+    "test:setup": "node test-proxy-setup.js",
+    "test:realtime-ui": "node test-realtime-ui.js",
+    "test:unit": "jest",
+    "test:integration": "jest --testPathPattern=integration",
+    "test:database": "jest --testPathPattern=database",
+    "test:proxy": "jest --testPathPattern=proxy",
+    "test:mocking": "jest --testPathPattern=mocking",
+    "test:help": "node tests/run-tests.js --help",
+    "test:list": "node tests/run-tests.js --list",
+    "test:ui": "node tests/ui/run-ui-tests.js",
+    "test:ui:components": "node tests/ui/run-ui-tests.js components",
+    "test:ui:integration": "node tests/ui/run-ui-tests.js integration",
+    "test:ui:e2e": "node tests/ui/run-ui-tests.js e2e",
+    "test:ui:database": "node tests/ui/run-ui-tests.js database",
+    "test:ui:install": "node tests/ui/run-ui-tests.js --install-deps",
+    "test:ui:help": "node tests/ui/run-ui-tests.js --help",
+    "test:regression": "node tests/run-regression-tests.js",
+    "test:event-timing": "jest tests/unit/proxy-event-timing.test.js --verbose",
+    "test:ui-communication": "jest tests/integration/proxy-ui-communication.integration.test.js --verbose",
+    "test:ui:updates": "node tests/run-ui-update-tests.js",
+    "test:ui:updates:unit": "jest tests/ui/unit/event-handling.test.jsx",
+    "test:ui:updates:integration": "jest tests/integration/ui-realtime-updates.integration.test.js",
+    "test:ui:updates:e2e": "npx playwright test tests/e2e/complete-workflows.e2e.test.js",
+    "test:mock:sync": "jest tests/integration/mock-synchronization.integration.test.js",
+    "test:realtime": "npm run test:ui:updates",
+    "test:coverage:ui": "jest --coverage tests/ui/ tests/integration/ui-realtime-updates.integration.test.js",
+    "test:all": "npm run test && npm run test:ui && npm run test:realtime"
+  },
+  "keywords": [],
+  "license": "ISC",
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ],
+  "dependencies": {
+    "electron-log": "^5.4.3",
+    "electron-updater": "^6.6.2",
+    "http-mitm-proxy": "^1.1.0",
+    "node-http-proxy": "^0.2.4",
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.40.0",
+    "@testing-library/jest-dom": "^6.8.0",
+    "@testing-library/react": "^14.3.1",
+    "@testing-library/user-event": "^14.6.1",
+    "axios": "^1.7.7",
+    "body-parser": "^1.20.3",
+    "concurrently": "^9.2.0",
+    "cors": "^2.8.5",
+    "cross-env": "^10.0.0",
+    "docker-compose": "^0.24.8",
+    "electron": "^22.3.27",
+    "electron-builder": "^26.0.12",
+    "esbuild": "^0.24.2",
+    "esbuild-jest": "^0.5.0",
+    "express": "^4.21.1",
+    "identity-obj-proxy": "^3.0.0",
+    "jest": "^29.7.0",
+    "jest-environment-jsdom": "^29.7.0",
+    "jest-environment-node": "^29.7.0",
+    "jsdom": "^23.2.0",
+    "mongodb": "^6.9.0",
+    "mssql": "^11.0.1",
+    "mysql2": "^3.11.3",
+    "pg": "^8.12.0",
+    "redis": "^4.7.0",
+    "supertest": "^6.3.3",
+    "tailwindcss": "^3.4.13",
+    "wait-for-expect": "^3.0.2"
+  },
+  "build": {
+    "appId": "com.sniffle.app",
+    "productName": "Sniffler",
+    "icon": "build/icon.ico",
+    "directories": {
+      "output": "dist/packages",
+      "buildResources": "build"
+    },
+    "files": [
+      "apps/main/**/*",
+      "apps/renderer/dist/**/*",
+      "node_modules/**/*",
+      "package.json"
+    ],
+    "extraMetadata": {
+      "main": "apps/main/index.js"
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "category": "Development"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico",
+      "forceCodeSigning": false,
+      "signAndEditExecutable": false,
+      "verifyUpdateCodeSignature": false
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Sniffler"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "YOUR_USERNAME",
+        "repo": "sniffler-releases",
+        "private": false
+      }
+    ]
+  }
+}

@@ -1,0 +1,137 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Custom animations */
+@keyframes slideInFromRight {
+  0% {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  100% {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slideOutToRight {
+  0% {
+    transform: translateX(0);
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+}
+
+@keyframes fadeIn {
+  0% {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.05);
+  }
+}
+
+.animate-slide-in {
+  animation: slideInFromRight 0.3s ease-out;
+}
+
+.animate-slide-out {
+  animation: slideOutToRight 0.3s ease-in;
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.2s ease-out;
+}
+
+.animate-pulse-subtle {
+  animation: pulse 2s ease-in-out infinite;
+}
+
+/* Custom responsive utilities */
+@layer utilities {
+  .text-responsive {
+    @apply text-sm sm:text-base;
+  }
+
+  .heading-responsive {
+    @apply text-lg sm:text-xl lg:text-2xl;
+  }
+
+  .padding-responsive {
+    @apply p-3 sm:p-4 lg:p-6;
+  }
+
+  .margin-responsive {
+    @apply m-3 sm:m-4 lg:m-6;
+  }
+
+  .gap-responsive {
+    @apply gap-2 sm:gap-3 lg:gap-4;
+  }
+
+  /* Mobile-first button styles */
+  .btn-responsive {
+    @apply px-3 py-2 text-sm sm:px-4 sm:text-base;
+  }
+
+  /* Scrollable content with touch support */
+  .scroll-touch {
+    @apply overflow-auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Hide scrollbars on mobile but keep functionality */
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* Ensure touch targets are at least 44px */
+@media (max-width: 768px) {
+  button,
+  [role="button"],
+  input[type="submit"],
+  input[type="button"] {
+    min-height: 44px;
+    min-width: 44px;
+  }
+}
+
+/* Improve text readability on small screens */
+@media (max-width: 640px) {
+  body {
+    font-size: 14px;
+    line-height: 1.5;
+  }
+}
+
+/* Custom focus styles for better accessibility */
+@layer base {
+  *:focus {
+    @apply outline-none ring-2 ring-blue-500 ring-offset-2;
+  }
+
+  *:focus:not(:focus-visible) {
+    @apply ring-0 ring-offset-0;
+  }
+}
