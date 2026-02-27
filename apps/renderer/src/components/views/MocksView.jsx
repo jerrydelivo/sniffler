@@ -12,6 +12,7 @@ import {
 import MockDetailModal from "../modals/MockDetailModal";
 import CreateMockModal from "../modals/CreateMockModal";
 import DeleteConfirmationModal from "../modals/DeleteConfirmationModal";
+import ResponseModal from "../modals/ResponseModal";
 import Toast from "../common/Toast";
 import {
   groupMocksByFamily,
@@ -34,6 +35,11 @@ function MocksView({ mocks, onRefreshMocks, hideHeader = false }) {
     isOpen: false,
     familyName: null,
     familyMocks: [],
+  });
+  const [responseModal, setResponseModal] = useState({
+    isOpen: false,
+    response: null,
+    request: null,
   });
 
   const showToast = (message, type = "info") => {
@@ -390,10 +396,23 @@ function MocksView({ mocks, onRefreshMocks, hideHeader = false }) {
       if (result.success) {
         const statusCode = result.response.statusCode;
         const isSuccess = statusCode >= 200 && statusCode < 400;
+
+        // Show success toast
         showToast(
-          `✅ Request sent successfully! Status: ${statusCode}`,
+          `Request sent successfully! Status: ${statusCode}`,
           isSuccess ? "success" : "warning"
         );
+
+        // Show response modal with the response data
+        setResponseModal({
+          isOpen: true,
+          response: result.response,
+          request: {
+            method: mock.method,
+            url: mock.url,
+            proxyPort: mock.proxyPort,
+          },
+        });
       } else {
         showToast(`❌ Failed to send request: ${result.error}`, "error");
       }
@@ -796,6 +815,20 @@ function MocksView({ mocks, onRefreshMocks, hideHeader = false }) {
           "Requests matching these patterns will reach the real target server",
           "This action cannot be undone",
         ]}
+      />
+
+      {/* Response Modal */}
+      <ResponseModal
+        isOpen={responseModal.isOpen}
+        onClose={() =>
+          setResponseModal({
+            isOpen: false,
+            response: null,
+            request: null,
+          })
+        }
+        response={responseModal.response}
+        request={responseModal.request}
       />
     </div>
   );

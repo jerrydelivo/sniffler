@@ -1,0 +1,159 @@
+/* Reliable Input Components - Enhanced for Electron */
+.reliable-input-container {
+  position: relative;
+  cursor: text;
+}
+
+.reliable-input-container.error .MuiOutlinedInput-root {
+  border-color: #dc2626 !important;
+}
+
+.reliable-input-container.error .MuiOutlinedInput-root:hover {
+  border-color: #b91c1c !important;
+}
+
+.reliable-input-container.error .MuiOutlinedInput-root.Mui-focused {
+  border-color: #dc2626 !important;
+}
+
+.reliable-select-container {
+  position: relative;
+  cursor: pointer;
+}
+
+.reliable-select-container.error .MuiOutlinedInput-root {
+  border-color: #dc2626 !important;
+}
+
+.reliable-select-container.error .MuiOutlinedInput-root:hover {
+  border-color: #b91c1c !important;
+}
+
+.reliable-select-container.error .MuiOutlinedInput-root.Mui-focused {
+  border-color: #dc2626 !important;
+}
+
+/* Dark mode overrides for MUI components */
+.dark .reliable-input-container .MuiInputBase-root {
+  background-color: #374151 !important;
+  color: #ffffff !important;
+}
+
+.dark .reliable-input-container .MuiInputBase-root:hover {
+  background-color: #4b5563 !important;
+}
+
+.dark .reliable-input-container .MuiInputBase-root.Mui-focused {
+  background-color: #374151 !important;
+}
+
+.dark .reliable-input-container .MuiOutlinedInput-notchedOutline {
+  border-color: #6b7280 !important;
+}
+
+.dark
+  .reliable-input-container
+  .MuiOutlinedInput-root:hover
+  .MuiOutlinedInput-notchedOutline {
+  border-color: #9ca3af !important;
+}
+
+.dark
+  .reliable-input-container
+  .MuiOutlinedInput-root.Mui-focused
+  .MuiOutlinedInput-notchedOutline {
+  border-color: #3b82f6 !important;
+}
+
+.dark .reliable-select-container .MuiInputBase-root {
+  background-color: #374151 !important;
+  color: #ffffff !important;
+}
+
+.dark .reliable-select-container .MuiInputBase-root:hover {
+  background-color: #4b5563 !important;
+}
+
+.dark .reliable-select-container .MuiSelect-icon {
+  color: #ffffff !important;
+}
+
+.dark .reliable-select-container .MuiOutlinedInput-notchedOutline {
+  border-color: #6b7280 !important;
+}
+
+.dark
+  .reliable-select-container
+  .MuiOutlinedInput-root:hover
+  .MuiOutlinedInput-notchedOutline {
+  border-color: #9ca3af !important;
+}
+
+.dark
+  .reliable-select-container
+  .MuiOutlinedInput-root.Mui-focused
+  .MuiOutlinedInput-notchedOutline {
+  border-color: #3b82f6 !important;
+}
+
+/* Dark mode for MUI dropdowns */
+.dark .MuiPaper-root {
+  background-color: #374151 !important;
+  color: #ffffff !important;
+}
+
+.dark .MuiMenuItem-root {
+  color: #ffffff !important;
+}
+
+.dark .MuiMenuItem-root:hover {
+  background-color: #4b5563 !important;
+}
+
+.dark .MuiMenuItem-root.Mui-selected {
+  background-color: #3b82f6 !important;
+}
+
+/* Ensure inputs are always clickable */
+.reliable-input-container input,
+.reliable-input-container textarea,
+.reliable-select-container .MuiSelect-select {
+  cursor: inherit !important;
+  pointer-events: auto !important;
+  user-select: text !important;
+}
+
+.reliable-input-container input:disabled,
+.reliable-input-container textarea:disabled,
+.reliable-select-container .MuiSelect-select.Mui-disabled {
+  cursor: not-allowed !important;
+  pointer-events: auto !important;
+}
+
+/* Force visibility and accessibility */
+.reliable-input-container .MuiInputBase-root,
+.reliable-select-container .MuiInputBase-root {
+  z-index: 1 !important;
+  position: relative !important;
+}
+
+/* Enhanced focus indicators for better visibility */
+.reliable-input-container .MuiInputBase-root.Mui-focused,
+.reliable-select-container .MuiInputBase-root.Mui-focused {
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2) !important;
+}
+
+/* Fix for textarea in multiline mode */
+.reliable-input-container .MuiInputBase-inputMultiline {
+  resize: vertical !important;
+  min-height: 60px !important;
+}
+
+/* Prevent text selection issues */
+.reliable-input-container *,
+.reliable-select-container * {
+  -webkit-user-select: auto !important;
+  -moz-user-select: auto !important;
+  -ms-user-select: auto !important;
+  user-select: auto !important;
+}

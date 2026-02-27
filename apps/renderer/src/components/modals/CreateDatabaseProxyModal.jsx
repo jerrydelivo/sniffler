@@ -1,6 +1,8 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { X, Database, AlertCircle } from "lucide-react";
 import { createPortBlurHandler } from "../../utils/portHandlers";
+import { ReliableInput } from "../common/ReliableInput";
+import { useModalFocusReliability } from "../../hooks/useInputReliability";
 
 const CreateDatabaseProxyModal = ({ isOpen, onClose, onConfirm }) => {
   const [formData, setFormData] = useState({
@@ -13,6 +15,10 @@ const CreateDatabaseProxyModal = ({ isOpen, onClose, onConfirm }) => {
   const [errors, setErrors] = useState({});
   const [portWarning, setPortWarning] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const modalRef = useRef(null);
+
+  // Enhanced modal focus management
+  useModalFocusReliability(isOpen, modalRef);
 
   const protocols = [
     { value: "postgresql", label: "PostgreSQL", icon: "🐘", defaultPort: 5432 },
@@ -135,11 +141,20 @@ const CreateDatabaseProxyModal = ({ isOpen, onClose, onConfirm }) => {
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-md mx-4">
+      <div
+        ref={modalRef}
+        className="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-md mx-4"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="modal-title"
+      >
         <div className="flex justify-between items-center p-6 border-b border-gray-200 dark:border-gray-700">
           <div className="flex items-center space-x-3">
             <Database className="text-green-500" size={24} />
-            <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
+            <h2
+              id="modal-title"
+              className="text-xl font-semibold text-gray-900 dark:text-white"
+            >
               Create Database Proxy
             </h2>
           </div>
@@ -188,16 +203,14 @@ const CreateDatabaseProxyModal = ({ isOpen, onClose, onConfirm }) => {
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
               Proxy Name
             </label>
-            <input
+            <ReliableInput
               type="text"
               value={formData.name}
               onChange={(e) => handleInputChange("name", e.target.value)}
               placeholder={`${selectedProtocol?.label || "Database"} Proxy`}
-              className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent ${
-                errors.name
-                  ? "border-red-300 dark:border-red-600"
-                  : "border-gray-300 dark:border-gray-600"
-              } dark:bg-gray-700 dark:text-white`}
+              name="name"
+              autoFocus
+              className={errors.name ? "error" : ""}
             />
             {errors.name && (
               <p className="mt-1 text-sm text-red-600 dark:text-red-400 flex items-center space-x-1">
@@ -212,7 +225,7 @@ const CreateDatabaseProxyModal = ({ isOpen, onClose, onConfirm }) => {
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
               Proxy Port
             </label>
-            <input
+            <ReliableInput
               type="number"
               value={formData.port}
               onChange={(e) => handleInputChange("port", e.target.value)}
@@ -220,11 +233,8 @@ const CreateDatabaseProxyModal = ({ isOpen, onClose, onConfirm }) => {
               placeholder="8080"
               min="1"
               max="65535"
-              className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent ${
-                errors.port
-                  ? "border-red-300 dark:border-red-600"
-                  : "border-gray-300 dark:border-gray-600"
-              } dark:bg-gray-700 dark:text-white`}
+              name="port"
+              className={errors.port ? "error" : ""}
             />
             {errors.port && (
               <p className="mt-1 text-sm text-red-600 dark:text-red-400 flex items-center space-x-1">
@@ -249,18 +259,15 @@ const CreateDatabaseProxyModal = ({ isOpen, onClose, onConfirm }) => {
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                 Target Host
               </label>
-              <input
+              <ReliableInput
                 type="text"
                 value={formData.targetHost}
                 onChange={(e) =>
                   handleInputChange("targetHost", e.target.value)
                 }
                 placeholder="localhost"
-                className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent ${
-                  errors.targetHost
-                    ? "border-red-300 dark:border-red-600"
-                    : "border-gray-300 dark:border-gray-600"
-                } dark:bg-gray-700 dark:text-white`}
+                name="targetHost"
+                className={errors.targetHost ? "error" : ""}
               />
               {errors.targetHost && (
                 <p className="mt-1 text-sm text-red-600 dark:text-red-400 flex items-center space-x-1">
@@ -273,7 +280,7 @@ const CreateDatabaseProxyModal = ({ isOpen, onClose, onConfirm }) => {
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                 Target Port
               </label>
-              <input
+              <ReliableInput
                 type="number"
                 value={formData.targetPort}
                 onChange={(e) =>
@@ -282,11 +289,8 @@ const CreateDatabaseProxyModal = ({ isOpen, onClose, onConfirm }) => {
                 placeholder={selectedProtocol?.defaultPort.toString() || "5432"}
                 min="1"
                 max="65535"
-                className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent ${
-                  errors.targetPort
-                    ? "border-red-300 dark:border-red-600"
-                    : "border-gray-300 dark:border-gray-600"
-                } dark:bg-gray-700 dark:text-white`}
+                name="targetPort"
+                className={errors.targetPort ? "error" : ""}
               />
               {errors.targetPort && (
                 <p className="mt-1 text-sm text-red-600 dark:text-red-400 flex items-center space-x-1">

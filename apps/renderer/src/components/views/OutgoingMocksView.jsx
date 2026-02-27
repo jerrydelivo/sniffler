@@ -277,6 +277,9 @@ function OutgoingMocksView({ mocks, proxies, onRefreshMocks }) {
   const renderMockCard = (mock, isInFamily = false) => (
     <div
       key={mock.id}
+      data-testid={`outgoing-mock-card-${mock.method}-${(
+        mock.url || ""
+      ).replace(/[^a-zA-Z0-9_-]/g, "-")}`}
       className={`bg-white dark:bg-gray-800 rounded-lg shadow p-4 ${
         isInFamily ? "ml-4 border-l-4 border-blue-200 dark:border-blue-800" : ""
       }`}
@@ -309,19 +312,31 @@ function OutgoingMocksView({ mocks, proxies, onRefreshMocks }) {
             >
               {mock.enabled ? "Enabled" : "Disabled"}
             </span>
-            <span className="text-xs sm:text-sm text-gray-500 dark:text-gray-400">
+            <span
+              className="text-xs sm:text-sm text-gray-500 dark:text-gray-400"
+              data-testid="outgoing-mock-status-code"
+            >
               Status: {mock.statusCode}
             </span>
-            <span className="text-xs text-gray-500 dark:text-gray-400">
+            <span
+              className="text-xs text-gray-500 dark:text-gray-400"
+              data-testid="outgoing-mock-proxy-port"
+            >
               Port: {mock.proxyPort}
             </span>
-            <span className="text-xs text-gray-500 dark:text-gray-400">
+            <span
+              className="text-xs text-gray-500 dark:text-gray-400"
+              data-testid="outgoing-mock-created-at"
+            >
               Created:{" "}
               {new Date(mock.createdAt || Date.now()).toLocaleDateString()}
             </span>
           </div>
 
-          <h3 className="text-base sm:text-lg font-medium text-gray-900 dark:text-white mb-1">
+          <h3
+            className="text-base sm:text-lg font-medium text-gray-900 dark:text-white mb-1"
+            data-testid="outgoing-mock-title"
+          >
             {mock.name || `${mock.method} ${mock.url}`}
           </h3>
         </div>

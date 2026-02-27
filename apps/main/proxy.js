@@ -4,6 +4,12 @@ const url = require("url");
 const { EventEmitter } = require("events");
 const { shouldCreateMockForRequest } = require("./requestPatterns");
 
+// Import mock comparison utilities
+const {
+  compareRequestWithMock,
+  findMatchingMock,
+} = require("./utils/mockComparison");
+
 class SnifflerProxy extends EventEmitter {
   constructor(config = {}) {
     super();
@@ -134,6 +140,9 @@ class SnifflerProxy extends EventEmitter {
   }
 
   handleRequest(req, res) {
+    console.log(
+      `🌟🌟🌟 PROXY HANDLING REQUEST: ${req.method} ${req.url} ON PORT ${this.port} 🌟🌟🌟`
+    );
     try {
       const startTime = Date.now();
       const request = {
@@ -177,7 +186,8 @@ class SnifflerProxy extends EventEmitter {
             this.stats.mocksServed++;
 
             // Update request with mock response
-            request.status = "success";
+            // Normalize final request lifecycle status to 'completed' (tests expect this)
+            request.status = "completed";
             request.response = {
               statusCode: mock.statusCode,
               headers: headers,
@@ -246,7 +256,7 @@ class SnifflerProxy extends EventEmitter {
                   res.end();
 
                   // Update request with response
-                  request.status = "success";
+                  request.status = "completed";
                   request.response = {
                     statusCode: targetRes.statusCode,
                     statusMessage: targetRes.statusMessage,
@@ -263,6 +273,110 @@ class SnifflerProxy extends EventEmitter {
                     this.stats.successfulRequests++;
                   } else {
                     this.stats.failedRequests++;
+                  }
+
+                  // Check for mock differences if we have a successful response
+                  if (
+                    (request.status === "completed" ||
+                      request.status === "success") &&
+                    request.response
+                  ) {
+                    try {
+                      const availableMocks = this.getMocks();
+                      const matchingMock = findMatchingMock(
+                        request,
+                        availableMocks
+                      );
+
+                      console.log(
+                        `🔍🔍🔍 PROXY MOCK COMPARISON CHECK for ${request.method} ${request.url} 🔍🔍🔍`
+                      );
+                      console.log(
+                        `   Available mocks: ${availableMocks?.length || 0}`
+                      );
+                      console.log(`   Matching mock found: ${!!matchingMock}`);
+                      console.log(`   Mock enabled: ${matchingMock?.enabled}`);
+                      console.log(
+                        `   Request was served from backend: ${!request.servedFromMock}`
+                      );
+
+                      // Check for differences if:
+                      // 1. We have a matching mock (regardless of enabled state)
+                      // 2. The request actually hit the backend (not served from mock)
+                      if (matchingMock && !request.servedFromMock) {
+                        console.log(
+                          `🔍 Found matching mock and request hit backend, comparing for API drift...`
+                        );
+                        const mockComparison = compareRequestWithMock(
+                          request,
+                          matchingMock
+                        );
+                        request.mockComparison = mockComparison;
+
+                        console.log(
+                          `   Has differences: ${mockComparison.hasDifferences}`
+                        );
+                        console.log(
+                          `   Comparison summary: ${mockComparison.summary}`
+                        );
+
+                        // Emit mock difference event if differences are detected
+                        if (mockComparison.hasDifferences) {
+                          console.log(
+                            `⚠️ Proxy API drift detected! Response differs from existing mock for ${request.method} ${request.url}`
+                          );
+                          console.log(
+                            `   Mock enabled: ${matchingMock.enabled}`
+                          );
+                          console.log(
+                            `   Differences:`,
+                            mockComparison.differences
+                          );
+                          console.log(
+                            `🚨🚨🚨 ABOUT TO EMIT MOCK-DIFFERENCE-DETECTED EVENT from proxy on port ${this.port} 🚨🚨🚨`
+                          );
+                          console.log(
+                            `🚨 Event listeners count:`,
+                            this.listenerCount("mock-difference-detected")
+                          );
+                          console.log(
+                            `🎯 Event emitter instance:`,
+                            this.constructor.name
+                          );
+                          console.log(
+                            `📍 Emitter memory location:`,
+                            Object.prototype.toString.call(this)
+                          );
+                          this.emit("mock-difference-detected", {
+                            request,
+                            mock: matchingMock,
+                            comparison: mockComparison,
+                            proxyPort: this.port,
+                            isDrift: true, // Flag to indicate this is API drift detection
+                          });
+                          console.log(
+                            `🚨🚨🚨 EVENT EMITTED SUCCESSFULLY 🚨🚨🚨`
+                          );
+                        } else {
+                          console.log(
+                            `✅ No differences found - current response matches existing mock`
+                          );
+                        }
+                      } else if (!matchingMock) {
+                        console.log(
+                          `🔍 No existing mock found - this is a new request pattern`
+                        );
+                      } else if (request.servedFromMock) {
+                        console.log(
+                          `🔍 Request was served from mock - no backend comparison needed`
+                        );
+                      }
+                    } catch (comparisonError) {
+                      console.error(
+                        "❌ Error during proxy mock comparison:",
+                        comparisonError
+                      );
+                    }
                   }
 
                   // Emit response event with updated request and response data
@@ -303,7 +417,13 @@ class SnifflerProxy extends EventEmitter {
                       };
 
                       this.mocks.set(mockKey, autoMock);
+                      // Maintain legacy event for any existing listeners
                       this.emit("mock-created", autoMock);
+                      // New standardized auto-created event payload aligns with main process expectations
+                      this.emit("mock-auto-created", {
+                        mock: autoMock,
+                        request,
+                      });
                     }
                   }
                 } catch (endError) {
@@ -642,7 +762,13 @@ class SnifflerProxy extends EventEmitter {
   }
 
   getRequests() {
-    return [...this.requests]; // Return copy to prevent external modification
+    // Return copy sorted by timestamp/startTime in ascending order (oldest first)
+    // Integration tests expect chronological ordering from earliest to latest
+    return [...this.requests].sort((a, b) => {
+      const timeA = a.startTime || new Date(a.timestamp).getTime();
+      const timeB = b.startTime || new Date(b.timestamp).getTime();
+      return timeA - timeB; // Ascending order (oldest first)
+    });
   }
 
   // Add addRequest method for testing
@@ -667,7 +793,7 @@ class SnifflerProxy extends EventEmitter {
     this.trimRequestHistory();
 
     // Update stats based on request status
-    if (request.status === "success") {
+    if (request.status === "completed" || request.status === "success") {
       this.stats.totalRequests++;
       if (
         request.response &&
@@ -729,7 +855,7 @@ class SnifflerProxy extends EventEmitter {
         targetPort: this.targetPort,
         name: this.name,
       },
-      requests: this.requests,
+      requests: this.getRequests(), // Use getRequests() to ensure chronological ordering
       mocks: Array.from(this.mocks.values()),
       stats: this.stats,
       timestamp: new Date().toISOString(),

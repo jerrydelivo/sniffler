@@ -28,8 +28,9 @@ import DeleteConfirmationModal from "../modals/DeleteConfirmationModal";
 import { formatContent, isBinaryContent } from "../../utils/helpers";
 import OutgoingMocksView from "./OutgoingMocksView";
 import { createPortBlurHandler } from "../../utils/portHandlers";
+import { PremiumFeatureBlock } from "../../hooks/usePremiumFeature.jsx";
 
-function OutgoingRequestView() {
+function OutgoingRequestView({ proxyNotifications, onClearNotifications }) {
   const [activeTab, setActiveTab] = useState("overview");
   const [proxies, setProxies] = useState([]);
   const [requests, setRequests] = useState([]);
@@ -60,6 +61,8 @@ function OutgoingRequestView() {
     name: "",
   });
   const [portWarning, setPortWarning] = useState(null);
+
+  // Notification tracking now handled by parent component via props
 
   const loadData = async () => {
     try {
@@ -130,6 +133,8 @@ function OutgoingRequestView() {
     setToast({ message, type });
     setTimeout(() => setToast(null), 3000);
   };
+
+  // Notification clearing now handled by parent component via onClearNotifications prop
 
   const handleCreateProxy = async () => {
     try {
@@ -492,6 +497,8 @@ function OutgoingRequestView() {
           );
         });
       }
+
+      // Mock difference events are now handled by parent App.jsx
     }
 
     return () => {
@@ -507,240 +514,257 @@ function OutgoingRequestView() {
     );
   }
 
-  return (
-    <div className="space-y-4 sm:space-y-6">
-      {/* Header */}
-      <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-4 sm:p-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-white">
-              Outgoing Proxy
-            </h1>
-            <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
-              Configure proxy servers to intercept and redirect outgoing
-              requests
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            {/* Warning badge when no proxies are active */}
-            {stats.totalProxies > 0 && stats.runningProxies === 0 && (
-              <div className="flex items-center gap-2 px-3 py-2 bg-orange-100 dark:bg-orange-900 text-orange-700 dark:text-orange-200 rounded-lg">
-                <MdWarning className="w-4 h-4" />
-                <span className="text-sm font-medium">No active proxies</span>
-              </div>
-            )}
+  const handleNavigateToLicense = () => {
+    // This would be passed from parent component
+    if (window.electronAPI) {
+      // For now, just show an alert - in real implementation, parent would handle navigation
+      alert(
+        "Please upgrade to premium to access Outgoing Request monitoring. Click the upgrade button in the sidebar."
+      );
+    }
+  };
 
-            {/* Import/Export buttons */}
-            <div className="flex items-center gap-1">
+  return (
+    <PremiumFeatureBlock
+      feature="outgoing-requests"
+      onUpgrade={handleNavigateToLicense}
+    >
+      <div className="space-y-4 sm:space-y-6">
+        {/* Header */}
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-4 sm:p-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-white">
+                Outgoing Proxy
+              </h1>
+              <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
+                Configure proxy servers to intercept and redirect outgoing
+                requests
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              {/* Warning badge when no proxies are active */}
+              {stats.totalProxies > 0 && stats.runningProxies === 0 && (
+                <div className="flex items-center gap-2 px-3 py-2 bg-orange-100 dark:bg-orange-900 text-orange-700 dark:text-orange-200 rounded-lg">
+                  <MdWarning className="w-4 h-4" />
+                  <span className="text-sm font-medium">No active proxies</span>
+                </div>
+              )}
+
+              {/* Import/Export buttons */}
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={handleImportOutgoingConfig}
+                  disabled={isImporting}
+                  className="flex items-center gap-1 px-2 py-2 text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-900 rounded-lg transition-colors"
+                  title="Import Configuration & Mocks"
+                >
+                  <MdFileUpload className="w-4 h-4" />
+                  <span className="hidden sm:inline text-sm">Import</span>
+                </button>
+                <button
+                  onClick={handleExportOutgoingConfig}
+                  disabled={isExporting}
+                  className="flex items-center gap-1 px-2 py-2 text-green-600 hover:text-green-800 dark:text-green-400 dark:hover:text-green-300 hover:bg-green-50 dark:hover:bg-green-900 rounded-lg transition-colors"
+                  title="Export Configuration & Mocks"
+                >
+                  <MdFileDownload className="w-4 h-4" />
+                  <span className="hidden sm:inline text-sm">Export</span>
+                </button>
+              </div>
+
               <button
-                onClick={handleImportOutgoingConfig}
-                disabled={isImporting}
-                className="flex items-center gap-1 px-2 py-2 text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-900 rounded-lg transition-colors"
-                title="Import Configuration & Mocks"
+                onClick={loadData}
+                className="flex items-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
               >
-                <MdFileUpload className="w-4 h-4" />
-                <span className="hidden sm:inline text-sm">Import</span>
-              </button>
-              <button
-                onClick={handleExportOutgoingConfig}
-                disabled={isExporting}
-                className="flex items-center gap-1 px-2 py-2 text-green-600 hover:text-green-800 dark:text-green-400 dark:hover:text-green-300 hover:bg-green-50 dark:hover:bg-green-900 rounded-lg transition-colors"
-                title="Export Configuration & Mocks"
-              >
-                <MdFileDownload className="w-4 h-4" />
-                <span className="hidden sm:inline text-sm">Export</span>
+                <MdRefresh />
+                Refresh
               </button>
             </div>
-
-            <button
-              onClick={loadData}
-              className="flex items-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-            >
-              <MdRefresh />
-              Refresh
-            </button>
           </div>
         </div>
-      </div>
 
-      {/* Status Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-        <StatCard
-          title="Total Requests"
-          value={stats.totalRequests || 0}
-          icon={<MdList />}
-          color="blue"
-        />
-        <StatCard
-          title="Successful"
-          value={stats.successfulRequests || 0}
-          icon={<MdCheckCircle />}
-          color="green"
-        />
-        <StatCard
-          title="Failed"
-          value={stats.failedRequests || 0}
-          icon={<MdError />}
-          color="red"
-        />
-        <StatCard
-          title="Active Proxies"
-          value={`${stats.runningProxies || 0}/${stats.totalProxies || 0}`}
-          icon={<MdWifi />}
-          color={stats.runningProxies > 0 ? "green" : "gray"}
-        />
-      </div>
-
-      {/* Tabs */}
-      <div className="bg-white dark:bg-gray-800 rounded-lg shadow">
-        <div className="border-b border-gray-200 dark:border-gray-700">
-          <nav className="flex overflow-x-auto" aria-label="Tabs">
-            {[
-              { id: "overview", label: "Overview", icon: <MdBarChart /> },
-              {
-                id: "proxies",
-                label: "Proxies",
-                icon: <MdSettings />,
-                count: proxies.length,
-              },
-              {
-                id: "requests",
-                label: "Requests",
-                icon: <MdList />,
-                count: requests.length,
-              },
-              {
-                id: "mocks",
-                label: "Mocks",
-                icon: <MdCheckCircle />,
-                count: outgoingMocks.length,
-              },
-            ].map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                className={`py-3 sm:py-4 px-3 sm:px-6 text-xs sm:text-sm font-medium border-b-2 flex items-center gap-1 sm:gap-2 flex-shrink-0 ${
-                  activeTab === tab.id
-                    ? "border-blue-500 text-blue-600 dark:text-blue-400"
-                    : "border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600"
-                }`}
-              >
-                <span className="text-sm sm:text-base">{tab.icon}</span>
-                <span className="hidden sm:inline">{tab.label}</span>
-                <span className="sm:hidden">{tab.label.slice(0, 3)}</span>
-                {tab.count !== undefined && (
-                  <span
-                    className={`ml-1 py-0.5 px-1.5 sm:px-2 rounded-full text-xs ${
-                      activeTab === tab.id
-                        ? "bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200"
-                        : "bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400"
-                    }`}
-                  >
-                    {tab.count}
-                  </span>
-                )}
-              </button>
-            ))}
-          </nav>
+        {/* Status Cards */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+          <StatCard
+            title="Total Requests"
+            value={stats.totalRequests || 0}
+            icon={<MdList />}
+            color="blue"
+          />
+          <StatCard
+            title="Successful"
+            value={stats.successfulRequests || 0}
+            icon={<MdCheckCircle />}
+            color="green"
+          />
+          <StatCard
+            title="Failed"
+            value={stats.failedRequests || 0}
+            icon={<MdError />}
+            color="red"
+          />
+          <StatCard
+            title="Active Proxies"
+            value={`${stats.runningProxies || 0}/${stats.totalProxies || 0}`}
+            icon={<MdWifi />}
+            color={stats.runningProxies > 0 ? "green" : "gray"}
+          />
         </div>
 
-        {/* Tab Content */}
-        <div className="p-4 sm:p-6">
-          {activeTab === "overview" && (
-            <ProxyOverview
-              proxies={proxies}
-              requests={requests}
-              stats={stats}
-              getProxyRequests={getProxyRequests}
-            />
-          )}
-          {activeTab === "proxies" && (
-            <ProxiesTab
-              proxies={proxies}
-              showAddProxy={showAddProxy}
-              setShowAddProxy={setShowAddProxy}
-              newProxy={newProxy}
-              setNewProxy={setNewProxy}
-              editingProxy={editingProxy}
-              setEditingProxy={setEditingProxy}
-              portWarning={portWarning}
-              setPortWarning={setPortWarning}
-              onCreateProxy={handleCreateProxy}
-              onStartProxy={handleStartProxy}
-              onStopProxy={handleStopProxy}
-              onUpdateProxy={handleUpdateProxy}
-              onRemoveProxy={handleRemoveProxy}
-              getProxyRequests={getProxyRequests}
-              onClearRequests={handleClearRequests}
-            />
-          )}
-          {activeTab === "requests" && (
-            <RequestsTab
-              requests={requests}
-              proxies={proxies}
-              onClearRequests={handleClearRequests}
-            />
-          )}
-          {activeTab === "mocks" && (
-            <OutgoingMocksView
-              mocks={outgoingMocks}
-              proxies={proxies}
-              onRefreshMocks={loadData}
-            />
-          )}
+        {/* Tabs */}
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow">
+          <div className="border-b border-gray-200 dark:border-gray-700">
+            <nav className="flex overflow-x-auto" aria-label="Tabs">
+              {[
+                { id: "overview", label: "Overview", icon: <MdBarChart /> },
+                {
+                  id: "proxies",
+                  label: "Proxies",
+                  icon: <MdSettings />,
+                  count: proxies.length,
+                },
+                {
+                  id: "requests",
+                  label: "Requests",
+                  icon: <MdList />,
+                  count: requests.length,
+                },
+                {
+                  id: "mocks",
+                  label: "Mocks",
+                  icon: <MdCheckCircle />,
+                  count: outgoingMocks.length,
+                },
+              ].map((tab) => (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`py-3 sm:py-4 px-3 sm:px-6 text-xs sm:text-sm font-medium border-b-2 flex items-center gap-1 sm:gap-2 flex-shrink-0 ${
+                    activeTab === tab.id
+                      ? "border-blue-500 text-blue-600 dark:text-blue-400"
+                      : "border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600"
+                  }`}
+                >
+                  <span className="text-sm sm:text-base">{tab.icon}</span>
+                  <span className="hidden sm:inline">{tab.label}</span>
+                  <span className="sm:hidden">{tab.label.slice(0, 3)}</span>
+                  {tab.count !== undefined && (
+                    <span
+                      className={`ml-1 py-0.5 px-1.5 sm:px-2 rounded-full text-xs ${
+                        activeTab === tab.id
+                          ? "bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200"
+                          : "bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400"
+                      }`}
+                    >
+                      {tab.count}
+                    </span>
+                  )}
+                </button>
+              ))}
+            </nav>
+          </div>
+
+          {/* Tab Content */}
+          <div className="p-4 sm:p-6">
+            {activeTab === "overview" && (
+              <ProxyOverview
+                proxies={proxies}
+                requests={requests}
+                stats={stats}
+                getProxyRequests={getProxyRequests}
+              />
+            )}
+            {activeTab === "proxies" && (
+              <ProxiesTab
+                proxies={proxies}
+                showAddProxy={showAddProxy}
+                setShowAddProxy={setShowAddProxy}
+                newProxy={newProxy}
+                setNewProxy={setNewProxy}
+                editingProxy={editingProxy}
+                setEditingProxy={setEditingProxy}
+                portWarning={portWarning}
+                setPortWarning={setPortWarning}
+                onCreateProxy={handleCreateProxy}
+                onStartProxy={handleStartProxy}
+                onStopProxy={handleStopProxy}
+                onUpdateProxy={handleUpdateProxy}
+                onRemoveProxy={handleRemoveProxy}
+                getProxyRequests={getProxyRequests}
+                onClearRequests={handleClearRequests}
+                proxyNotifications={proxyNotifications}
+                onClearNotifications={onClearNotifications}
+              />
+            )}
+            {activeTab === "requests" && (
+              <RequestsTab
+                requests={requests}
+                proxies={proxies}
+                onClearRequests={handleClearRequests}
+              />
+            )}
+            {activeTab === "mocks" && (
+              <OutgoingMocksView
+                mocks={outgoingMocks}
+                proxies={proxies}
+                onRefreshMocks={loadData}
+              />
+            )}
+          </div>
         </div>
-      </div>
 
-      {/* Toast notification */}
-      {toast && (
-        <Toast
-          message={toast.message}
-          type={toast.type}
-          onClose={() => setToast(null)}
+        {/* Toast notification */}
+        {toast && (
+          <Toast
+            message={toast.message}
+            type={toast.type}
+            onClose={() => setToast(null)}
+          />
+        )}
+
+        {/* Delete Confirmation Modal */}
+        <DeleteConfirmationModal
+          isOpen={deleteModal.isOpen}
+          onClose={() => setDeleteModal({ isOpen: false, proxy: null })}
+          onConfirm={handleConfirmProxyDelete}
+          title="Remove Outgoing Proxy"
+          itemName={deleteModal.proxy?.name}
+          itemType="outgoing-proxy"
+          description={
+            deleteModal.proxy
+              ? `Port ${deleteModal.proxy.port} → ${deleteModal.proxy.targetUrl}`
+              : ""
+          }
         />
-      )}
 
-      {/* Delete Confirmation Modal */}
-      <DeleteConfirmationModal
-        isOpen={deleteModal.isOpen}
-        onClose={() => setDeleteModal({ isOpen: false, proxy: null })}
-        onConfirm={handleConfirmProxyDelete}
-        title="Remove Outgoing Proxy"
-        itemName={deleteModal.proxy?.name}
-        itemType="outgoing-proxy"
-        description={
-          deleteModal.proxy
-            ? `Port ${deleteModal.proxy.port} → ${deleteModal.proxy.targetUrl}`
-            : ""
-        }
-      />
-
-      {/* Clear Confirmation Modal */}
-      <DeleteConfirmationModal
-        isOpen={clearModal.isOpen}
-        onClose={() =>
-          setClearModal({ isOpen: false, proxyPort: null, proxyName: null })
-        }
-        onConfirm={handleConfirmClearRequests}
-        title="Clear Requests"
-        itemName={
-          clearModal.proxyPort
-            ? `${
-                clearModal.proxyName || `Port ${clearModal.proxyPort}`
-              } requests`
-            : "All outgoing requests"
-        }
-        itemType="data"
-        action="clear"
-        consequences={[
-          clearModal.proxyPort
-            ? "All request history for this proxy will be cleared"
-            : "All outgoing request history will be cleared",
-          "This data cannot be recovered",
-          "Active mocks and configurations will not be affected",
-        ]}
-      />
-    </div>
+        {/* Clear Confirmation Modal */}
+        <DeleteConfirmationModal
+          isOpen={clearModal.isOpen}
+          onClose={() =>
+            setClearModal({ isOpen: false, proxyPort: null, proxyName: null })
+          }
+          onConfirm={handleConfirmClearRequests}
+          title="Clear Requests"
+          itemName={
+            clearModal.proxyPort
+              ? `${
+                  clearModal.proxyName || `Port ${clearModal.proxyPort}`
+                } requests`
+              : "All outgoing requests"
+          }
+          itemType="data"
+          action="clear"
+          consequences={[
+            clearModal.proxyPort
+              ? "All request history for this proxy will be cleared"
+              : "All outgoing request history will be cleared",
+            "This data cannot be recovered",
+            "Active mocks and configurations will not be affected",
+          ]}
+        />
+      </div>
+    </PremiumFeatureBlock>
   );
 }
 
@@ -970,6 +994,8 @@ function ProxiesTab({
   onRemoveProxy,
   getProxyRequests,
   onClearRequests,
+  proxyNotifications,
+  onClearNotifications,
 }) {
   const handlePortBlur = createPortBlurHandler(newProxy.port, setPortWarning);
 
@@ -1101,6 +1127,8 @@ function ProxiesTab({
               onRemoveProxy={onRemoveProxy}
               getProxyRequests={getProxyRequests}
               onClearRequests={onClearRequests}
+              notificationCount={proxyNotifications.get(proxy.port) || 0}
+              onClearNotifications={onClearNotifications}
             />
           ))
         )}
@@ -1120,6 +1148,8 @@ function ProxyCard({
   onRemoveProxy,
   getProxyRequests,
   onClearRequests,
+  notificationCount,
+  onClearNotifications,
 }) {
   const [editForm, setEditForm] = useState(proxy);
   const proxyRequests = getProxyRequests(proxy.port);
@@ -1212,6 +1242,15 @@ function ProxyCard({
             <h4 className="font-medium text-gray-900 dark:text-white truncate">
               {proxy.name}
             </h4>
+            {notificationCount > 0 && (
+              <button
+                onClick={() => onClearNotifications(proxy.port)}
+                className="inline-flex items-center justify-center px-2 py-1 text-xs font-bold leading-none text-white bg-red-600 hover:bg-red-700 rounded-full transition-colors cursor-pointer"
+                title="Click to clear notifications"
+              >
+                ({notificationCount})
+              </button>
+            )}
             <div
               className={`flex items-center gap-1 px-2 py-1 rounded text-xs ${
                 proxy.isRunning

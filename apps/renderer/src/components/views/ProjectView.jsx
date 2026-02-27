@@ -11,27 +11,45 @@ import {
   MdPause,
   MdDelete,
   MdMoreVert,
+  MdEdit,
 } from "react-icons/md";
 import RequestsView from "./RequestsView";
 import MocksView from "./MocksView";
 import TestingView from "./TestingView";
 import ConfirmationModal from "../modals/ConfirmationModal";
+import { usePremiumFeature } from "../../hooks/usePremiumFeature.jsx";
 
 function ProjectView({
   project,
   requests,
   mocks,
+  recentMockDifferences = [],
+  onClearRecentMockDifferences,
   onRefreshMocks,
   onStopProject,
   onExportProject,
   onEnableProject,
   onDisableProject,
   onDeleteProject,
+  onClearMockDifferenceNotifications,
 }) {
   const [activeTab, setActiveTab] = useState("overview");
   const [showActionMenu, setShowActionMenu] = useState(false);
   const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editForm, setEditForm] = useState({
+    name: "",
+    port: "",
+    targetHost: "",
+    targetPort: "",
+  });
   const actionMenuRef = useRef(null);
+  const prevActiveTabRef = useRef(activeTab);
+
+  // Check premium access for mocks and testing features
+  const { canUseFeature: canUseMocks } = usePremiumFeature("mock-management");
+  const { canUseFeature: canUseTesting } =
+    usePremiumFeature("advanced-features");
 
   // Close action menu when clicking outside
   useEffect(() => {
@@ -52,6 +70,19 @@ function ProjectView({
       document.removeEventListener("mousedown", handleClickOutside);
     };
   }, [showActionMenu]);
+
+  // Clear recent mock differences when navigating away from requests tab
+  useEffect(() => {
+    const prevTab = prevActiveTabRef.current;
+    if (
+      prevTab === "requests" &&
+      activeTab !== "requests" &&
+      onClearRecentMockDifferences
+    ) {
+      onClearRecentMockDifferences();
+    }
+    prevActiveTabRef.current = activeTab;
+  }, [activeTab, onClearRecentMockDifferences]);
 
   const handleExportProject = async () => {
     if (onExportProject) {
@@ -80,6 +111,71 @@ function ProjectView({
       await onDeleteProject(project.port);
     }
     setShowDeleteConfirmation(false);
+  };
+
+  const handleEditProject = () => {
+    setEditForm({
+      name: project.name,
+      port: project.port.toString(),
+      targetHost: project.targetHost || "localhost",
+      targetPort: (project.targetPort || 3000).toString(),
+    });
+    setShowEditModal(true);
+  };
+
+  const handleSaveEdit = async () => {
+    try {
+      // Validate inputs
+      if (!editForm.name.trim()) {
+        alert("Project name is required");
+        return;
+      }
+
+      const newPort = parseInt(editForm.port);
+      const newTargetPort = parseInt(editForm.targetPort);
+
+      if (isNaN(newPort) || newPort < 1 || newPort > 65535) {
+        alert("Proxy port must be a number between 1 and 65535");
+        return;
+      }
+
+      if (isNaN(newTargetPort) || newTargetPort < 1 || newTargetPort > 65535) {
+        alert("Target port must be a number between 1 and 65535");
+        return;
+      }
+
+      if (!editForm.targetHost.trim()) {
+        alert("Target host is required");
+        return;
+      }
+
+      if (window.electronAPI && window.electronAPI.updateProxyConfig) {
+        const updates = {
+          name: editForm.name.trim(),
+          port: newPort,
+          targetHost: editForm.targetHost.trim(),
+          targetPort: newTargetPort,
+        };
+
+        const result = await window.electronAPI.updateProxyConfig(
+          project.port,
+          updates
+        );
+
+        if (result.success) {
+          setShowEditModal(false);
+          // Refresh the project data by calling the parent component's refresh function
+          if (window.electronAPI && window.electronAPI.getProxies) {
+            // This will trigger a reload in the parent App component
+            window.location.reload();
+          }
+        } else {
+          alert(`Failed to update proxy configuration: ${result.error}`);
+        }
+      }
+    } catch (error) {
+      alert(`Error updating proxy configuration: ${error.message}`);
+    }
   };
 
   return (
@@ -139,6 +235,17 @@ function ProjectView({
                 <span className="hidden lg:inline">Export</span>
               </button>
 
+              {project.disabled && (
+                <button
+                  onClick={handleEditProject}
+                  className="flex items-center gap-2 px-3 py-2 text-sm bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors"
+                  title="Edit Project Configuration"
+                >
+                  <MdEdit size={16} />
+                  <span className="hidden lg:inline">Edit</span>
+                </button>
+              )}
+
               <button
                 onClick={handleToggleProject}
                 className={`flex items-center gap-2 px-3 py-2 text-sm rounded-lg transition-colors ${
@@ -190,6 +297,18 @@ function ProjectView({
                     <MdFileUpload />
                     Export Project
                   </button>
+                  {project.disabled && (
+                    <button
+                      onClick={() => {
+                        handleEditProject();
+                        setShowActionMenu(false);
+                      }}
+                      className="w-full px-4 py-2 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-3"
+                    >
+                      <MdEdit />
+                      Edit Configuration
+                    </button>
+                  )}
                   <button
                     onClick={() => {
                       handleToggleProject();
@@ -235,21 +354,43 @@ function ProjectView({
                 label: "Mocks",
                 icon: <MdTheaters />,
                 count: mocks.length,
+                isPremium: !canUseMocks,
               },
-              { id: "testing", label: "Testing", icon: <MdScience /> },
+              {
+                id: "testing",
+                label: "Testing",
+                icon: <MdScience />,
+                isPremium: !canUseTesting,
+              },
             ].map((tab) => (
               <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                className={`py-3 sm:py-4 px-3 sm:px-6 text-xs sm:text-sm font-medium border-b-2 flex items-center gap-1 sm:gap-2 flex-shrink-0 ${
+                onClick={() => {
+                  if (tab.isPremium) {
+                    // Don't change tab, just show the premium message in content
+                    return;
+                  }
+                  setActiveTab(tab.id);
+                  // Clear mock difference notifications when switching to Requests tab
+                  if (
+                    tab.id === "requests" &&
+                    onClearMockDifferenceNotifications
+                  ) {
+                    onClearMockDifferenceNotifications();
+                  }
+                }}
+                className={`py-3 sm:py-4 px-3 sm:px-6 text-xs sm:text-sm font-medium border-b-2 flex items-center gap-1 sm:gap-2 flex-shrink-0 relative ${
                   activeTab === tab.id
                     ? "border-blue-500 text-blue-600 dark:text-blue-400"
+                    : tab.isPremium
+                    ? "border-transparent text-gray-400 dark:text-gray-500 cursor-not-allowed"
                     : "border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600"
                 }`}
               >
                 <span className="text-sm sm:text-base">{tab.icon}</span>
                 <span className="hidden sm:inline">{tab.label}</span>
                 <span className="sm:hidden">{tab.label.slice(0, 3)}</span>
+                {tab.isPremium && <span className="text-xs">🔒</span>}
                 {tab.count !== undefined && (
                   <span
                     className={`ml-1 py-0.5 px-1.5 sm:px-2 rounded-full text-xs ${
@@ -279,18 +420,61 @@ function ProjectView({
             <RequestsView
               requests={requests}
               mocks={mocks}
+              recentMockDifferences={recentMockDifferences}
+              onClearRecentMockDifferences={onClearRecentMockDifferences}
               onRefreshMocks={onRefreshMocks}
               hideHeader={true}
             />
           )}
-          {activeTab === "mocks" && (
-            <MocksView
-              mocks={mocks}
-              onRefreshMocks={onRefreshMocks}
-              hideHeader={true}
-            />
-          )}
-          {activeTab === "testing" && <TestingView hideHeader={true} />}
+          {activeTab === "mocks" &&
+            (canUseMocks ? (
+              <MocksView
+                mocks={mocks}
+                onRefreshMocks={onRefreshMocks}
+                hideHeader={true}
+              />
+            ) : (
+              <div className="bg-gradient-to-br from-blue-50 to-purple-50 border-2 border-dashed border-blue-300 rounded-lg p-8 text-center">
+                <div className="mx-auto w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mb-4">
+                  <MdTheaters className="w-8 h-8 text-blue-600" />
+                </div>
+                <h3 className="text-xl font-semibold text-gray-900 mb-2">
+                  Premium Feature: Mocks
+                </h3>
+                <p className="text-gray-600 mb-6">
+                  Mock management requires a premium license. Upgrade to unlock
+                  the ability to create, manage, and use mocks for your API
+                  testing.
+                </p>
+                <div className="space-y-3">
+                  <p className="text-sm text-gray-500">
+                    Start your free 30-day trial or upgrade to premium
+                  </p>
+                </div>
+              </div>
+            ))}
+          {activeTab === "testing" &&
+            (canUseTesting ? (
+              <TestingView hideHeader={true} />
+            ) : (
+              <div className="bg-gradient-to-br from-blue-50 to-purple-50 border-2 border-dashed border-blue-300 rounded-lg p-8 text-center">
+                <div className="mx-auto w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mb-4">
+                  <MdScience className="w-8 h-8 text-blue-600" />
+                </div>
+                <h3 className="text-xl font-semibold text-gray-900 mb-2">
+                  Premium Feature: Testing
+                </h3>
+                <p className="text-gray-600 mb-6">
+                  Regression testing requires a premium license. Upgrade to
+                  unlock automated testing and validation of your API mocks.
+                </p>
+                <div className="space-y-3">
+                  <p className="text-sm text-gray-500">
+                    Start your free 30-day trial or upgrade to premium
+                  </p>
+                </div>
+              </div>
+            ))}
         </div>
       </div>
 
@@ -305,6 +489,117 @@ function ProjectView({
         cancelText="Cancel"
         type="danger"
       />
+
+      {/* Edit Configuration Modal */}
+      {showEditModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full">
+            <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+                Edit Project Configuration
+              </h3>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                Modify the target configuration for this proxy
+              </p>
+            </div>
+
+            <div className="px-6 py-4 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Project Name
+                </label>
+                <input
+                  type="text"
+                  value={editForm.name}
+                  onChange={(e) =>
+                    setEditForm((prev) => ({ ...prev, name: e.target.value }))
+                  }
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  placeholder="Enter project name"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Proxy Port
+                </label>
+                <input
+                  type="number"
+                  value={editForm.port}
+                  onChange={(e) =>
+                    setEditForm((prev) => ({ ...prev, port: e.target.value }))
+                  }
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  placeholder="3000"
+                  min="1"
+                  max="65535"
+                />
+              </div>
+
+              <div className="bg-orange-50 dark:bg-orange-900 border border-orange-200 dark:border-orange-700 rounded-lg p-3">
+                <h4 className="text-sm font-medium text-orange-800 dark:text-orange-200 mb-3">
+                  Target Configuration
+                </h4>
+
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-sm font-medium text-orange-700 dark:text-orange-300 mb-1">
+                      Target Host
+                    </label>
+                    <input
+                      type="text"
+                      value={editForm.targetHost}
+                      onChange={(e) =>
+                        setEditForm((prev) => ({
+                          ...prev,
+                          targetHost: e.target.value,
+                        }))
+                      }
+                      className="w-full px-3 py-2 border border-orange-300 dark:border-orange-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                      placeholder="localhost"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-orange-700 dark:text-orange-300 mb-1">
+                      Target Port
+                    </label>
+                    <input
+                      type="number"
+                      value={editForm.targetPort}
+                      onChange={(e) =>
+                        setEditForm((prev) => ({
+                          ...prev,
+                          targetPort: e.target.value,
+                        }))
+                      }
+                      className="w-full px-3 py-2 border border-orange-300 dark:border-orange-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                      placeholder="3000"
+                      min="1"
+                      max="65535"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex justify-end gap-3">
+              <button
+                onClick={() => setShowEditModal(false)}
+                className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveEdit}
+                className="px-4 py-2 text-sm font-medium text-white bg-orange-600 border border-transparent rounded-lg hover:bg-orange-700 transition-colors"
+              >
+                Save Changes
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -4,6 +4,12 @@ const { URL } = require("url");
 const zlib = require("zlib");
 const { promisify } = require("util");
 
+// Import mock comparison utilities
+const {
+  compareRequestWithMock,
+  findMatchingMock,
+} = require("./utils/mockComparison");
+
 // Promisify compression methods for easier async handling
 const gunzip = promisify(zlib.gunzip);
 const inflate = promisify(zlib.inflate);
@@ -700,6 +706,90 @@ class OutgoingInterceptor extends EventEmitter {
                     }
                   }
 
+                  // Check for mock differences if we have a successful response
+                  if (request.status === "success" && request.response) {
+                    try {
+                      const availableMocks = this.getOutgoingMocks(port);
+                      const matchingMock = findMatchingMock(
+                        request,
+                        availableMocks
+                      );
+
+                      console.log(
+                        `🔍 Outgoing mock comparison check for ${request.method} ${request.url}`
+                      );
+                      console.log(
+                        `   Available mocks: ${availableMocks?.length || 0}`
+                      );
+                      console.log(`   Matching mock found: ${!!matchingMock}`);
+                      console.log(`   Mock enabled: ${matchingMock?.enabled}`);
+                      console.log(
+                        `   Request was served from backend: ${!request.servedFromMock}`
+                      );
+
+                      // Check for differences if:
+                      // 1. We have a matching mock (regardless of enabled state)
+                      // 2. The request actually hit the backend (not served from mock)
+                      if (matchingMock && !request.servedFromMock) {
+                        console.log(
+                          `🔍 Found matching mock and request hit backend, comparing for API drift...`
+                        );
+                        const mockComparison = compareRequestWithMock(
+                          request,
+                          matchingMock
+                        );
+                        request.mockComparison = mockComparison;
+
+                        console.log(
+                          `   Has differences: ${mockComparison.hasDifferences}`
+                        );
+                        console.log(
+                          `   Comparison summary: ${mockComparison.summary}`
+                        );
+
+                        // Emit mock difference event if differences are detected
+                        if (mockComparison.hasDifferences) {
+                          console.log(
+                            `⚠️ Outgoing API drift detected! Response differs from existing mock for ${request.method} ${request.url}`
+                          );
+                          console.log(
+                            `   Mock enabled: ${matchingMock.enabled}`
+                          );
+                          console.log(
+                            `   Differences:`,
+                            mockComparison.differences
+                          );
+                          if (!this.isInitializing) {
+                            this.emit("outgoing-mock-difference-detected", {
+                              request,
+                              mock: matchingMock,
+                              comparison: mockComparison,
+                              proxyPort: port,
+                              isDrift: true, // Flag to indicate this is API drift detection
+                            });
+                          }
+                        } else {
+                          console.log(
+                            `✅ No differences found - current response matches existing mock`
+                          );
+                        }
+                      } else if (!matchingMock) {
+                        console.log(
+                          `🔍 No existing mock found - this is a new request pattern`
+                        );
+                      } else if (request.servedFromMock) {
+                        console.log(
+                          `🔍 Request was served from mock - no backend comparison needed`
+                        );
+                      }
+                    } catch (comparisonError) {
+                      console.error(
+                        "❌ Error during mock comparison:",
+                        comparisonError
+                      );
+                    }
+                  }
+
                   // Emit response event - only emit for real-time UI updates if not initializing
                   if (!this.isInitializing) {
                     this.emit("outgoing-response", request);
@@ -1097,6 +1187,7 @@ class OutgoingInterceptor extends EventEmitter {
       proxyPort,
       method,
       url,
+      category: "outgoing",
       statusCode: response.statusCode || 200,
       headers: response.headers || { "Content-Type": "application/json" },
       body: response.body || "{}",

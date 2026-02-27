@@ -1,6 +1,6 @@
 {
   "name": "sniffler",
-  "version": "1.0.0",
+  "version": "1.0.9",
   "description": "Cross-platform Electron desktop app for developers/testers, inspired by Postman, focused on real-time request sniffing, mocking, and regression testing for back-end APIs.",
   "main": "index.js",
   "author": {
@@ -9,15 +9,19 @@
   },
   "homepage": "https://github.com/user/Sniffler",
   "scripts": {
-    "dev": "concurrently \"npm run dev --workspace=apps/renderer\" \"npm run start --workspace=apps/main\"",
+    "dev": "concurrently \"npm run dev --workspace=apps/renderer\" \"cross-env SNIFFLER_DEVTOOLS=1 npm run start --workspace=apps/main\"",
+    "icons": "node scripts/generate-ico.js",
     "dev:test-server": "cd ../test-server && npm run dev",
     "build": "npm run build --workspace=apps/renderer",
+    "prepack": "npm run icons",
     "start": "npm run start --workspace=apps/main",
     "dist": "npm run build && npx electron-builder --publish=never",
     "test": "node tests/run-tests.js",
     "test:setup": "node test-proxy-setup.js",
     "test:realtime-ui": "node test-realtime-ui.js",
     "test:unit": "jest",
+    "test:unit:lite": "jest -c jest.unit.config.js",
+    "test:licensing": "jest -c jest.unit.config.js tests/unit/licensing-purchase.test.js --verbose",
     "test:integration": "jest --testPathPattern=integration",
     "test:database": "jest --testPathPattern=database",
     "test:proxy": "jest --testPathPattern=proxy",
@@ -77,9 +81,11 @@
     "jest-environment-jsdom": "^29.7.0",
     "jest-environment-node": "^29.7.0",
     "jsdom": "^23.2.0",
+    "png-to-ico": "^2.1.8",
     "mongodb": "^6.9.0",
     "mssql": "^11.0.1",
     "mysql2": "^3.11.3",
+    "sharp": "^0.33.4",
     "pg": "^8.12.0",
     "redis": "^4.7.0",
     "supertest": "^6.3.3",
@@ -90,6 +96,12 @@
     "appId": "com.sniffle.app",
     "productName": "Sniffler",
     "icon": "build/icon.ico",
+    "protocols": {
+      "name": "sniffler-protocol",
+      "schemes": [
+        "sniffler"
+      ]
+    },
     "directories": {
       "output": "dist/packages",
       "buildResources": "build"
@@ -118,7 +130,8 @@
           ]
         }
       ],
-      "category": "Development"
+      "category": "Development",
+      "icon": "build/icon-512.png"
     },
     "win": {
       "target": [
@@ -136,6 +149,7 @@
         }
       ],
       "icon": "build/icon.ico",
+      "executableName": "Sniffler",
       "forceCodeSigning": false,
       "signAndEditExecutable": false,
       "verifyUpdateCodeSignature": false
@@ -156,7 +170,12 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Sniffler"
+      "shortcutName": "Sniffler",
+      "artifactName": "Sniffler.Setup.${version}.exe",
+      "allowElevation": true,
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": false,
+      "include": "build/installer.nsh"
     },
     "publish": [
       {

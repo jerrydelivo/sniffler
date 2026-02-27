@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { X, Trash2, Edit, Clock, Database, Activity } from "lucide-react";
+import { ReliableInput } from "../ReliableInput";
 
 const DatabaseMockDetailModal = ({
   isOpen,
@@ -191,8 +192,7 @@ const DatabaseMockDetailModal = ({
                         Name
                       </label>
                       {isEditing ? (
-                        <input
-                          type="text"
+                        <ReliableInput
                           value={editData.name}
                           onChange={(e) =>
                             setEditData((prev) => ({
@@ -200,7 +200,8 @@ const DatabaseMockDetailModal = ({
                               name: e.target.value,
                             }))
                           }
-                          className="block w-full mt-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-gray-700 dark:text-white"
+                          fullWidth
+                          size="small"
                         />
                       ) : (
                         <div className="text-gray-900 dark:text-white font-medium">
@@ -276,7 +277,7 @@ const DatabaseMockDetailModal = ({
                   Description
                 </h3>
                 {isEditing ? (
-                  <textarea
+                  <ReliableInput
                     value={editData.description || ""}
                     onChange={(e) =>
                       setEditData((prev) => ({
@@ -284,9 +285,10 @@ const DatabaseMockDetailModal = ({
                         description: e.target.value,
                       }))
                     }
+                    multiline
                     rows={3}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-gray-700 dark:text-white"
                     placeholder="Add a description..."
+                    fullWidth
                   />
                 ) : (
                   <div className="text-gray-700 dark:text-gray-300">
@@ -303,7 +305,7 @@ const DatabaseMockDetailModal = ({
                 Query Pattern
               </h3>
               {isEditing ? (
-                <textarea
+                <ReliableInput
                   value={editData.pattern}
                   onChange={(e) =>
                     setEditData((prev) => ({
@@ -311,8 +313,12 @@ const DatabaseMockDetailModal = ({
                       pattern: e.target.value,
                     }))
                   }
+                  multiline
                   rows={8}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent font-mono text-sm dark:bg-gray-700 dark:text-white"
+                  fullWidth
+                  InputProps={{
+                    style: { fontFamily: "monospace", fontSize: "0.875rem" },
+                  }}
                 />
               ) : (
                 <div className="font-mono text-sm bg-gray-50 dark:bg-gray-700 rounded-lg p-4 whitespace-pre-wrap">
@@ -341,7 +347,7 @@ const DatabaseMockDetailModal = ({
                 Mock Response
               </h3>
               {isEditing ? (
-                <textarea
+                <ReliableInput
                   value={
                     typeof editData.response === "object"
                       ? JSON.stringify(editData.response, null, 2)
@@ -358,8 +364,12 @@ const DatabaseMockDetailModal = ({
                     }
                     setEditData((prev) => ({ ...prev, response: value }));
                   }}
+                  multiline
                   rows={12}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent font-mono text-sm dark:bg-gray-700 dark:text-white"
+                  fullWidth
+                  InputProps={{
+                    style: { fontFamily: "monospace", fontSize: "0.875rem" },
+                  }}
                 />
               ) : (
                 <div className="font-mono text-sm bg-gray-50 dark:bg-gray-700 rounded-lg p-4 max-h-64 overflow-y-auto">

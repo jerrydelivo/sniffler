@@ -13,6 +13,106 @@ function DatabaseView({ hideHeader = false }) {
     targetPort: 5432,
     name: "PostgreSQL Proxy",
   });
+  // UI-only protocol variant for versioned options
+  const [protocolVariant, setProtocolVariant] = useState("postgresql");
+
+  const variantDefaults = {
+    // PostgreSQL
+    postgresql: {
+      base: "postgresql",
+      port: 15432,
+      targetPort: 5432,
+      name: "PostgreSQL Proxy",
+    },
+    "postgresql@15": {
+      base: "postgresql",
+      port: 15432,
+      targetPort: 5432,
+      name: "PostgreSQL 15 Proxy",
+    },
+    "postgresql@13": {
+      base: "postgresql",
+      port: 15432,
+      targetPort: 5432,
+      name: "PostgreSQL 13 Proxy",
+    },
+    // MySQL
+    mysql: {
+      base: "mysql",
+      port: 13306,
+      targetPort: 3306,
+      name: "MySQL Proxy",
+    },
+    "mysql@8.0": {
+      base: "mysql",
+      port: 13306,
+      targetPort: 3306,
+      name: "MySQL 8.0 Proxy",
+    },
+    "mysql@5.7": {
+      base: "mysql",
+      port: 13306,
+      targetPort: 3306,
+      name: "MySQL 5.7 Proxy",
+    },
+    // MongoDB
+    mongodb: {
+      base: "mongodb",
+      port: 37017,
+      targetPort: 27017,
+      name: "MongoDB Proxy",
+    },
+    "mongodb@7.0": {
+      base: "mongodb",
+      port: 37017,
+      targetPort: 27017,
+      name: "MongoDB 7.0 Proxy",
+    },
+    "mongodb@5.0": {
+      base: "mongodb",
+      port: 37017,
+      targetPort: 27017,
+      name: "MongoDB 5.0 Proxy",
+    },
+    // SQL Server
+    sqlserver: {
+      base: "sqlserver",
+      port: 11433,
+      targetPort: 1433,
+      name: "SQL Server Proxy",
+    },
+    "sqlserver@2022": {
+      base: "sqlserver",
+      port: 11433,
+      targetPort: 1433,
+      name: "SQL Server 2022 Proxy",
+    },
+    "sqlserver@2019": {
+      base: "sqlserver",
+      port: 11433,
+      targetPort: 1433,
+      name: "SQL Server 2019 Proxy",
+    },
+    // Redis
+    redis: {
+      base: "redis",
+      port: 16379,
+      targetPort: 6379,
+      name: "Redis Proxy",
+    },
+    "redis@7": {
+      base: "redis",
+      port: 16379,
+      targetPort: 6379,
+      name: "Redis 7 Proxy",
+    },
+    "redis@6": {
+      base: "redis",
+      port: 16379,
+      targetPort: 6379,
+      name: "Redis 6 Proxy",
+    },
+  };
 
   useEffect(() => {
     loadProxies();
@@ -166,53 +266,47 @@ function DatabaseView({ hideHeader = false }) {
                 Protocol
               </label>
               <select
-                value={newProxy.protocol}
+                value={protocolVariant}
                 onChange={(e) => {
-                  const protocol = e.target.value;
-                  const protocolDefaults = {
-                    postgresql: {
-                      port: 15432,
-                      targetPort: 5432,
-                      name: "PostgreSQL Proxy",
-                    },
-                    mysql: {
-                      port: 13306,
-                      targetPort: 3306,
-                      name: "MySQL Proxy",
-                    },
-                    mongodb: {
-                      port: 37017,
-                      targetPort: 27017,
-                      name: "MongoDB Proxy",
-                    },
-                    sqlserver: {
-                      port: 11433,
-                      targetPort: 1433,
-                      name: "SQL Server Proxy",
-                    },
-                    redis: {
-                      port: 16379,
-                      targetPort: 6379,
-                      name: "Redis Proxy",
-                    },
-                  };
-
+                  const variant = e.target.value;
+                  setProtocolVariant(variant);
+                  const def =
+                    variantDefaults[variant] || variantDefaults["postgresql"];
                   setNewProxy((prev) => ({
                     ...prev,
-                    protocol: protocol,
-                    port: protocolDefaults[protocol]?.port || prev.port,
-                    targetPort:
-                      protocolDefaults[protocol]?.targetPort || prev.targetPort,
-                    name: protocolDefaults[protocol]?.name || prev.name,
+                    protocol: def.base,
+                    port: def.port,
+                    targetPort: def.targetPort,
+                    name: def.name,
                   }));
                 }}
                 className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white text-gray-900"
               >
-                <option value="postgresql">PostgreSQL</option>
-                <option value="mysql">MySQL</option>
-                <option value="mongodb">MongoDB</option>
-                <option value="sqlserver">SQL Server</option>
-                <option value="redis">Redis</option>
+                <optgroup label="PostgreSQL">
+                  <option value="postgresql@15">PostgreSQL › 15</option>
+                  <option value="postgresql@13">PostgreSQL › 13</option>
+                  <option value="postgresql">PostgreSQL (Any)</option>
+                </optgroup>
+                <optgroup label="MySQL">
+                  <option value="mysql@8.0">MySQL › 8.0</option>
+                  <option value="mysql@5.7">MySQL › 5.7</option>
+                  <option value="mysql">MySQL (Any)</option>
+                </optgroup>
+                <optgroup label="SQL Server">
+                  <option value="sqlserver@2022">SQL Server › 2022</option>
+                  <option value="sqlserver@2019">SQL Server › 2019</option>
+                  <option value="sqlserver">SQL Server (Any)</option>
+                </optgroup>
+                <optgroup label="MongoDB">
+                  <option value="mongodb@7.0">MongoDB › 7.0</option>
+                  <option value="mongodb@5.0">MongoDB › 5.0</option>
+                  <option value="mongodb">MongoDB (Any)</option>
+                </optgroup>
+                <optgroup label="Redis">
+                  <option value="redis@7">Redis › 7</option>
+                  <option value="redis@6">Redis › 6</option>
+                  <option value="redis">Redis (Any)</option>
+                </optgroup>
               </select>
             </div>
 

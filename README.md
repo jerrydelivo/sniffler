@@ -1,270 +1,219 @@
-# Sniffler - API Traffic Sniffing & Mocking Tool
+# Sniffler
 
-## Overview
+Cross-platform Electron desktop app for developers and testers to sniff, proxy, mock, and regression-test real API traffic. Think “Postman for real traffic” with instant mocks, repeatable test flows, and desktop packaging for Windows/macOS/Linux.
 
-Sniffler is a cross-platform Electron desktop application designed for developers and testers. It provides real-time request sniffing, mocking, and regression testing capabilities for back-end APIs. Inspired by Postman but focused on intercepting and analyzing actual network traffic.
+## Highlights
 
-## Features
+- Real HTTP/HTTPS proxy with request/response capture, filtering, and search
+- One-click “Save as Mock” and deterministic mock replay with priority rules
+- Multi-project, multi-port sniffing with named workspaces
+- Fast UI (React + Tailwind) and robust main process (Electron + Node)
+- Batteries-included testing: unit, integration, UI, and regression test runners
+- Auto-update ready packages for Win/macOS/Linux via electron-builder
+- Licensing and trial flow integrated with the Sniffler Licensing API
 
-### ✅ Core Features (Implemented)
+### Automatic Mock Creation (New)
 
-- **Multi-Port Sniffing**: Monitor multiple ports simultaneously with named projects
-- **HTTP/HTTPS Proxying**: Intercept and analyze web traffic
-- **Real-time Request Logging**: Live monitoring with filtering and search
-- **Interactive Mock Management**: Save requests as reusable mocks
-- **Modern UI**: React + Tailwind with dark mode support
-- **Export/Import**: Save and share mock collections
+When the setting "Auto-save new requests as mocks" is enabled (Settings > General), Sniffler will automatically create a disabled mock for every successful (HTTP status 2xx–3xx) response across all supported traffic types:
 
-### 🚧 In Development
+- Standard proxy HTTP/HTTPS requests (event: `mock-auto-created`)
+- Outgoing MITM intercepted requests (event: `outgoing-mock-auto-created`)
+- Database queries (event: `database-mock-auto-created`)
 
-- **Regression Testing**: Automated testing with diff comparison
-- **Database Protocol Support**: PostgreSQL and MySQL sniffing
-- **WebSocket Support**: Real-time connection monitoring
-- **License Management**: Trial and premium features
-- **Advanced Filtering**: Complex request filtering options
+Mocks appear instantly in the UI without needing to refresh thanks to real-time IPC events. Auto-created mocks are disabled by default so production traffic is unaffected until you explicitly enable them. This gives you a continuously growing library of up‑to‑date examples you can toggle on for regression testing or temporary isolation from unstable upstream services.
 
-### 🔮 Planned Features
-
-- **AI Mock Suggestions**: Intelligent endpoint recommendations
-- **Custom Scripts**: Pre/post-request transformation
-- **Team Collaboration**: Shared mock collections
-- **CI/CD Integration**: Command-line companion tool
-
-## Getting Started
-
-### Prerequisites
-
-- Node.js 18 or higher
-- npm or yarn package manager
-
-### Installation
-
-1. **Clone the repository:**
-
-   ```bash
-   git clone https://github.com/your-username/sniffler.git
-   cd sniffler
-   ```
-
-2. **Install dependencies:**
-
-   ```bash
-   npm run install:all
-   ```
-
-3. **Start development mode:**
-
-   ```bash
-   npm run dev
-   ```
-
-   This will start both the renderer (React) and main (Electron) processes.
-
-### Building for Production
-
-```bash
-# Build the renderer process
-npm run build
-
-# Create distribution packages
-npm run dist
-```
-
-## Project Structure
+## Repository layout (this package)
 
 ```
 sniffler/
-├── apps/
-│   ├── main/                 # Electron main process
-│   │   ├── index.js         # Main app entry point
-│   │   ├── proxy.js         # HTTP proxy implementation
-│   │   └── preload.js       # IPC bridge
-│   └── renderer/            # React frontend
-│       ├── index.js         # React app
-│       ├── index.html       # HTML template
-│       └── index.css        # Tailwind styles
-├── packages/
-│   └── shared/              # Shared utilities
-│       ├── types.js         # Type definitions
-│       └── utils.js         # Helper functions
-└── package.json             # Root package config
+├─ apps/
+│  ├─ main/        # Electron main process (proxy, IPC, app lifecycle)
+│  └─ renderer/    # React UI (requests table, mocks, settings)
+├─ build/          # Icons, NSIS installer script, build resources
+├─ tests/          # Unit, integration, UI, docker/e2e helpers
+├─ dist/           # Build artifacts (generated)
+├─ package.json    # Scripts, workspaces, electron-builder config
+└─ AUTO_UPDATE_GUIDE.md and helper scripts
 ```
 
-## Usage Guide
+Key dependencies: http-mitm-proxy, electron, electron-updater, ws.
 
-### 1. Setting Up a Proxy
+## Install and Run (Windows PowerShell)
 
-1. Navigate to the **Proxies** tab
-2. Click **"Add Proxy"**
-3. Enter a name (e.g., "My API Project") and port number (e.g., 8080)
-4. Click **"Start Proxy"**
+From repo root (Nose/sniffler):
 
-### 2. Configuring Your Application
+- Install dependencies: npm install
+- Dev (renderer + main): npm run dev
+- Main only: npm run start
+- Build renderer: npm run build
+- Package app: npm run dist
 
-Configure your backend application to use the proxy:
+Notes
 
-#### Node.js/Express
+- Multiple commands can be chained with PowerShell using the ; separator when needed.
+- Dev script uses npm workspaces to launch apps/renderer and apps/main concurrently.
 
-```javascript
-// Set HTTP proxy for your requests
-process.env.HTTP_PROXY = "http://localhost:8080";
-process.env.HTTPS_PROXY = "http://localhost:8080";
-```
+## How it works
 
-#### Python/Django
+1. Main process (apps/main)
 
-```python
-# settings.py
-PROXIES = {
-    'http': 'http://localhost:8080',
-    'https': 'http://localhost:8080',
-}
-```
+- Starts an HTTP/HTTPS MITM proxy (http-mitm-proxy)
+- Captures requests/responses, normalizes payloads, and forwards summaries to the renderer via IPC/WebSocket
+- Applies mock rules: when a matching mock is enabled, the real request is short-circuited and the mock response is returned
+- Manages licensing checks and premium feature gating
 
-#### .NET Core
+2. Renderer (apps/renderer)
 
-```csharp
-// Program.cs
-services.Configure<HttpClientFactoryOptions>(options =>
-{
-    options.HttpClientActions.Add(client =>
-    {
-        client.DefaultRequestVersion = HttpVersion.Version11;
-        // Configure proxy here
-    });
-});
-```
+- Presents real-time traffic table with filters (method, status, URL, time)
+- Request detail pane: headers, body, timing, diff
+- Mocks tab: create, enable/disable, edit, import/export collections
+- Settings: ports, proxy CA guidance, theme, license status
 
-### 3. Monitoring Traffic
+## Packaging and updates
 
-1. Make requests from your application
-2. View real-time traffic in the **Requests** tab
-3. Filter by status, method, or search terms
-4. Click **"View"** to see detailed request/response data
+electron-builder is configured in package.json:
 
-### 4. Creating Mocks
+- appId: com.sniffle.app, productName: Sniffler
+- Windows targets: nsis and portable, with custom NSIS include (build/installer.nsh)
+- Linux targets: AppImage, deb
+- macOS target: dmg (x64/arm64)
+- Custom URL protocol: sniffler://
+- Output to dist/packages
 
-1. Find a successful request in the **Requests** tab
-2. Click **"Save as Mock"**
-3. The mock will appear in the **Mocks** tab
-4. Future requests to the same endpoint will serve the mock response
+Auto-update can be enabled through electron-updater with GitHub releases. See AUTO_UPDATE_GUIDE.md for details. Publishing is configured but placeholder values must be updated before release.
 
-### 5. Managing Mocks
+## Scripts (most useful)
 
-- **View all mocks** in the Mocks tab
-- **Enable/disable** individual mocks
-- **Edit** mock responses
-- **Export/import** mock collections for sharing
+- npm run dev # Start renderer and main together
+- npm run start # Start main only (expects renderer build available)
+- npm run build # Build renderer assets
+- npm run dist # Build and package installers
+- npm run test # Composite test runner
+- npm run test:unit # Jest unit suite
+- npm run test:ui # UI test harness
+- npm run test:regression # Regression runner
 
-## Architecture
+Additional targeted suites exist under tests/ (integration, e2e, UI updates, etc.).
 
-### Main Process (Node.js)
+## Licensing overview
 
-- **HTTP Proxy**: Uses `http-mitm-proxy` for intercepting requests
-- **Mock Storage**: In-memory storage with export/import capabilities
-- **IPC Communication**: Handles renderer process communication
-- **Settings Management**: User preferences and license management
+Sniffler supports a free trial and premium features. The desktop app integrates with the Sniffler Licensing API (Vercel). Key points:
 
-### Renderer Process (React)
+- Trial starts on first run and is tied to a machine ID
+- Premium unlock via Stripe checkout and license validation
+- Tests for the licensing flow exist under tests/unit (e.g., licensing-purchase.test.js)
 
-- **Modern UI**: React 18 with hooks and functional components
-- **Styling**: Tailwind CSS with dark mode support
-- **State Management**: React useState and useEffect hooks
-- **Real-time Updates**: IPC event listeners for live data
+See the sibling project sniffler-licensing-api for API endpoints and deployment details.
 
-## Development
+## Pricing & Usage Terms
 
-### Scripts
+This repository is open-source under ISC (see [License](#license)), while the packaged "Sniffler" desktop binaries expose premium functionality gated by a subscription license. By running the distributed (packaged) application you agree to these usage terms.
 
-```bash
-# Install all dependencies
-npm run install:all
+### Plan Tiers (current)
 
-# Development mode (both processes)
-npm run dev
+| Tier                 | Who it's for                        | Indicative Price\* | Included                              | Key Limits                                                     |
+| -------------------- | ----------------------------------- | ------------------ | ------------------------------------- | -------------------------------------------------------------- |
+| Free Trial           | First‑time users evaluating locally | €0 for 14 days     | All core capture + mock basics        | 1 device, non‑commercial, limited premium features (see below) |
+| Pro – Individual     | Solo developer                      | €8 / month         | All features, updates                 | 1 active machine (you can transfer)                            |
+| Pro – 5 User Bundle  | Small team                          | €25 / month        | 5 seats, all features                 | 5 concurrent active machines                                   |
+| Pro – 10 User Bundle | Growing team                        | €40 / month        | 10 seats, all features                | 10 concurrent active machines                                  |
+| Enterprise / Custom  | Larger orgs, custom needs           | Contact            | All features + SLA + priority support | As negotiated                                                  |
 
-# Build renderer only
-npm run build
+\*Pricing shown is indicative (from the demo Stripe setup) and may change before public GA. Taxes (VAT/GST) may apply depending on your billing region. If publicly advertised pricing differs, the public website or checkout page is authoritative.
 
-# Start main process only
-npm run start
+### Feature Access Summary
 
-# Create distribution packages
-npm run dist
-```
+| Feature                              | Trial                                   | Pro (all)                                          |
+| ------------------------------------ | --------------------------------------- | -------------------------------------------------- |
+| HTTP/HTTPS capture & filtering       | Yes                                     | Yes                                                |
+| Save & replay mocks                  | Yes                                     | Yes                                                |
+| Unlimited mock collections           | Limited (up to 3 collections, 50 mocks) | Unlimited                                          |
+| Advanced match priority rules        | Limited (basic path & method)           | Full (headers, body predicates, latency injection) |
+| Regression test runner               | Limited (10 test cases)                 | Unlimited                                          |
+| Auto‑update channel                  | Yes                                     | Yes                                                |
+| Premium notifications / integrations | Preview (may be rate‑limited)           | Full                                               |
+| Commercial use                       | No (evaluation only)                    | Yes                                                |
+| Support                              | Community / best‑effort                 | Priority email (enterprise can add SLA)            |
 
-### Adding Features
+Limits are enforced client‑side and/or via the Licensing API. Soft limits may show warnings before strict enforcement. Numbers above are defaults; future releases may allow customization.
 
-1. **Backend features**: Modify files in `apps/main/`
-2. **UI features**: Modify files in `apps/renderer/`
-3. **Shared utilities**: Add to `packages/shared/`
+### Definitions
 
-### IPC Communication
+- "Seat" = a licensed user / machine activation slot. A machine can be deactivated to free a seat.
+- "Trial" = a one‑time 14 day evaluation linked to a hardware fingerprint. It cannot be reset via API (see Trial Deletion Policy in licensing API README).
+- "Premium Features" = any functionality gated when the license check reports `isPremium: false` (e.g., higher mock limits, advanced matchers).
 
-The app uses Electron's IPC for communication between processes:
+### Fair Use & Restrictions
 
-```javascript
-// Renderer to Main
-const result = await window.electronAPI.startProxy({
-  port: 8080,
-  name: "Test",
-});
+You must not:
 
-// Main to Renderer (events)
-window.electronAPI.onProxyRequest((data) => {
-  console.log("New request:", data);
-});
-```
+1. Circumvent, disable, or tamper with licensing checks or trial limits.
+2. Resell the unmodified desktop binaries without a separate redistribution agreement.
+3. Use the Free Trial for sustained commercial projects beyond evaluation.
+4. Bulk export sensitive captured traffic belonging to third parties without consent.
 
-## Security Considerations
+Reasonable automated test usage (CI) is allowed for licensed seats so long as concurrent machine activations do not exceed plan limits.
 
-- **Local CA Certificate**: For HTTPS interception (requires user setup)
-- **Data Storage**: All data stored locally, optional encryption planned
-- **Network Access**: Only intercepts configured proxy traffic
-- **Privacy**: No telemetry without explicit user consent
+### Data & Privacy
 
-## Contributing
+Captured HTTP(s) traffic stays local unless you explicitly export it. The Licensing API receives only minimal data (machineId, license key / trial state) needed to validate entitlement. No captured payload bodies are transmitted to the licensing service.
 
-1. Fork the repository
-2. Create a feature branch: `git checkout -b feature/amazing-feature`
-3. Commit changes: `git commit -m 'Add amazing feature'`
-4. Push to branch: `git push origin feature/amazing-feature`
-5. Open a Pull Request
+### Plan Changes & Grandfathering
 
-## License
+We may adjust price points, limits, or included features. Active subscriptions remain on their existing price for at least one renewal cycle after a public change. Material reductions in included limits for paid plans will either (a) not apply to existing subscribers while they keep an active subscription, or (b) be accompanied by an upgrade path with notice ≥30 days.
 
-This project is licensed under the ISC License - see the LICENSE file for details.
+### Refunds & Cancellations (summary)
 
-## Roadmap
+- Subscriptions renew automatically until cancelled.
+- You can cancel any time; access continues until the period ends. No partial refunds for unused time.
+- In the rare case of extended (>24h) service disruption of the Licensing API preventing premium use, pro‑rated credit may be granted.
 
-### Version 1.0 (Current)
+### Attribution & Open Source License
 
-- [x] Basic proxy functionality
-- [x] Request/response logging
-- [x] Mock creation and management
-- [x] Modern UI with dark mode
-- [ ] Export/import refinements
+The source (this repository) is ISC: you can fork, modify, and redistribute source under that license. The name "Sniffler" and official binary distribution branding are reserved; do not imply official affiliation for modified builds without permission.
 
-### Version 1.1 (Next)
+### Contact
 
-- [ ] Regression testing suite
-- [ ] Database protocol support
-- [ ] Advanced filtering options
-- [ ] License management system
+For enterprise quotes, compliance questions, or custom terms: open an issue or email (planned) support@sniffler.app (placeholder – update before launch).
 
-### Version 2.0 (Future)
+### Quick API Reference
 
-- [ ] AI-powered mock suggestions
-- [ ] Team collaboration features
-- [ ] WebSocket support
-- [ ] Custom scripting engine
-
-## Support
-
-- **Issues**: Report bugs and feature requests on GitHub Issues
-- **Documentation**: Check the `/docs` folder for detailed guides
-- **Community**: Join discussions in GitHub Discussions
+Licensing endpoints: see `sniffler-licensing-api/README.md` for `check-license`, `create-checkout`, and admin endpoints. Desktop app performs periodic POST `/api/check-license` calls to refresh entitlement.
 
 ---
 
-**Built with ❤️ for the developer community**
+## HTTPS interception
+
+To intercept HTTPS, a local CA certificate must be installed and trusted. The app guides you through generating and trusting the CA. For security, capture occurs only on ports you opt into, and data remains local unless explicitly exported by you.
+
+## Uninstall behavior (Windows)
+
+When uninstalling via Programs & Features, the uninstaller asks whether to keep your Sniffler configurations and data.
+
+- Yes = Keep settings (safe if you plan to reinstall). Data typically lives in:
+  - %APPDATA%\Sniffler
+  - %LOCALAPPDATA%\Sniffler
+  - %PROGRAMDATA%\Sniffler (if used)
+  - %USERPROFILE%\.sniffler
+- No = Remove everything (configs, workspaces, mocks, logs). These folders are deleted if present.
+
+Note: Certificate trust settings you added to the OS remain unless you remove them manually; the CA/key files stored under the folders above are deleted only if you choose No.
+
+## Contributing
+
+We welcome contributions that improve stability, features, or docs.
+
+- Fork, create a branch, and submit a PR
+- Add or update tests for behavior changes
+- Prefer small, focused commits
+
+## Troubleshooting
+
+- Renderer blank screen: ensure npm run build completed before npm run start
+- No traffic captured: verify your app is configured to use the Sniffler proxy and port is correct
+- HTTPS not captured: ensure the CA is generated and trusted; restart apps if needed
+- Packaging fails: check electron-builder version and icon paths under build/
+
+## License
+
+ISC. See LICENSE.

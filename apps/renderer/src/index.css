@@ -127,10 +127,25 @@
 
 /* Custom focus styles for better accessibility */
 @layer base {
-  *:focus {
+  /* Apply blue focus ring only to non-form interactive elements */
+  button:focus,
+  [role="button"]:focus,
+  a:focus,
+  [tabindex]:not([tabindex="-1"]):focus {
     @apply outline-none ring-2 ring-blue-500 ring-offset-2;
   }
 
+  /* For inputs (including MUI TextField internals), let component styles handle focus */
+  input:focus,
+  textarea:focus,
+  select:focus,
+  .MuiInputBase-input:focus,
+  .MuiOutlinedInput-root.Mui-focused,
+  .MuiInputBase-root.Mui-focused {
+    @apply outline-none ring-0 ring-offset-0;
+  }
+
+  /* Remove ring when not focus-visible */
   *:focus:not(:focus-visible) {
     @apply ring-0 ring-offset-0;
   }

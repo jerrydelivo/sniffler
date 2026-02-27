@@ -1,4 +1,7 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
+import { ReliableInput, ReliableSelect } from "../common/ReliableInput";
+import { MenuItem } from "@mui/material";
+import { useModalFocusReliability } from "../../hooks/useInputReliability";
 
 function CreateMockModal({ onClose, onRefreshMocks }) {
   const [formData, setFormData] = useState({
@@ -11,6 +14,10 @@ function CreateMockModal({ onClose, onRefreshMocks }) {
   });
   const [selectedProxy, setSelectedProxy] = useState("");
   const [proxies, setProxies] = useState([]);
+  const modalRef = useRef(null);
+
+  // Enhanced modal focus management
+  useModalFocusReliability(true, modalRef);
 
   useEffect(() => {
     loadProxies();
@@ -67,10 +74,19 @@ function CreateMockModal({ onClose, onRefreshMocks }) {
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
-      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-2xl max-h-full overflow-auto border border-gray-200 dark:border-gray-700">
+      <div
+        ref={modalRef}
+        className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-2xl max-h-full overflow-auto border border-gray-200 dark:border-gray-700"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="modal-title"
+      >
         <div className="p-6">
           <div className="flex items-center justify-between mb-6 pb-4 border-b border-gray-200 dark:border-gray-700">
-            <h2 className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+            <h2
+              id="modal-title"
+              className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2"
+            >
               <span className="text-2xl">✨</span>
               Create New Mock
             </h2>
@@ -89,19 +105,20 @@ function CreateMockModal({ onClose, onRefreshMocks }) {
                   <span>🔌</span>
                   Proxy
                 </label>
-                <select
+                <ReliableSelect
                   value={selectedProxy}
                   onChange={(e) => setSelectedProxy(e.target.value)}
-                  className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
                   required
+                  autoFocus
+                  placeholder="Select Proxy"
+                  name="proxy"
                 >
-                  <option value="">Select Proxy</option>
                   {proxies.map((proxy) => (
-                    <option key={proxy.port} value={proxy.port}>
+                    <MenuItem key={proxy.port} value={proxy.port}>
                       {proxy.name} (Port: {proxy.port})
-                    </option>
+                    </MenuItem>
                   ))}
-                </select>
+                </ReliableSelect>
               </div>
 
               <div>
@@ -109,12 +126,12 @@ function CreateMockModal({ onClose, onRefreshMocks }) {
                   <span>🔧</span>
                   Method
                 </label>
-                <select
+                <ReliableSelect
                   value={formData.method}
                   onChange={(e) =>
                     setFormData({ ...formData, method: e.target.value })
                   }
-                  className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                  name="method"
                 >
                   {[
                     "GET",
@@ -125,11 +142,11 @@ function CreateMockModal({ onClose, onRefreshMocks }) {
                     "HEAD",
                     "OPTIONS",
                   ].map((method) => (
-                    <option key={method} value={method}>
+                    <MenuItem key={method} value={method}>
                       {method}
-                    </option>
+                    </MenuItem>
                   ))}
-                </select>
+                </ReliableSelect>
               </div>
             </div>
 
@@ -138,15 +155,16 @@ function CreateMockModal({ onClose, onRefreshMocks }) {
                 <span>🌐</span>
                 URL Path
               </label>
-              <input
+              <ReliableInput
                 type="text"
                 value={formData.url}
                 onChange={(e) =>
                   setFormData({ ...formData, url: e.target.value })
                 }
                 placeholder="/api/users"
-                className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 font-mono"
                 required
+                name="url"
+                style={{ fontFamily: "monospace" }}
               />
             </div>
 
@@ -156,7 +174,7 @@ function CreateMockModal({ onClose, onRefreshMocks }) {
                   <span>📊</span>
                   Status Code
                 </label>
-                <input
+                <ReliableInput
                   type="number"
                   value={formData.statusCode}
                   onChange={(e) =>
@@ -164,8 +182,9 @@ function CreateMockModal({ onClose, onRefreshMocks }) {
                   }
                   min="100"
                   max="599"
-                  className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 font-mono [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                   required
+                  name="statusCode"
+                  style={{ fontFamily: "monospace" }}
                 />
               </div>
 
@@ -174,14 +193,14 @@ function CreateMockModal({ onClose, onRefreshMocks }) {
                   <span>🏷️</span>
                   Mock Name (Optional)
                 </label>
-                <input
+                <ReliableInput
                   type="text"
                   value={formData.name}
                   onChange={(e) =>
                     setFormData({ ...formData, name: e.target.value })
                   }
                   placeholder="My Custom Mock"
-                  className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                  name="name"
                 />
               </div>
             </div>
@@ -191,14 +210,21 @@ function CreateMockModal({ onClose, onRefreshMocks }) {
                 <span>📋</span>
                 Response Headers (JSON)
               </label>
-              <textarea
+              <ReliableInput
                 value={formData.headers}
                 onChange={(e) =>
                   setFormData({ ...formData, headers: e.target.value })
                 }
                 rows={4}
-                className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-900 dark:bg-gray-950 text-green-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 font-mono text-sm"
+                multiline
                 required
+                name="headers"
+                style={{
+                  fontFamily: "monospace",
+                  fontSize: "14px",
+                  backgroundColor: "#111827",
+                  color: "#10b981",
+                }}
               />
             </div>
 
@@ -207,14 +233,21 @@ function CreateMockModal({ onClose, onRefreshMocks }) {
                 <span>📄</span>
                 Response Body
               </label>
-              <textarea
+              <ReliableInput
                 value={formData.body}
                 onChange={(e) =>
                   setFormData({ ...formData, body: e.target.value })
                 }
                 rows={6}
-                className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-900 dark:bg-gray-950 text-green-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 font-mono text-sm"
+                multiline
                 placeholder="Response body content"
+                name="body"
+                style={{
+                  fontFamily: "monospace",
+                  fontSize: "14px",
+                  backgroundColor: "#111827",
+                  color: "#10b981",
+                }}
               />
             </div>
 

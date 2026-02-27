@@ -1,5 +1,7 @@
 import { useState, useEffect } from "react";
 import { X, Database, AlertCircle, Code } from "lucide-react";
+import { ReliableInput, ReliableSelect } from "../ReliableInput";
+import { MenuItem } from "@mui/material";
 
 const CreateDatabaseMockModal = ({
   isOpen,
@@ -213,16 +215,12 @@ const CreateDatabaseMockModal = ({
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                 Mock Name
               </label>
-              <input
-                type="text"
+              <ReliableInput
                 value={formData.name}
                 onChange={(e) => handleInputChange("name", e.target.value)}
                 placeholder="User Query Mock"
-                className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent ${
-                  errors.name
-                    ? "border-red-300 dark:border-red-600"
-                    : "border-gray-300 dark:border-gray-600"
-                } dark:bg-gray-700 dark:text-white`}
+                error={!!errors.name}
+                fullWidth
               />
               {errors.name && (
                 <p className="mt-1 text-sm text-red-600 dark:text-red-400 flex items-center space-x-1">
@@ -236,21 +234,17 @@ const CreateDatabaseMockModal = ({
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                 Protocol
               </label>
-              <div className="relative">
-                <select
-                  value={formData.protocol}
-                  onChange={(e) =>
-                    handleInputChange("protocol", e.target.value)
-                  }
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent dark:bg-gray-700 dark:text-white appearance-none"
-                >
-                  {protocols.map((protocol) => (
-                    <option key={protocol.value} value={protocol.value}>
-                      {protocol.icon} {protocol.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              <ReliableSelect
+                value={formData.protocol}
+                onChange={(e) => handleInputChange("protocol", e.target.value)}
+                fullWidth
+              >
+                {protocols.map((protocol) => (
+                  <MenuItem key={protocol.value} value={protocol.value}>
+                    {protocol.icon} {protocol.label}
+                  </MenuItem>
+                ))}
+              </ReliableSelect>
             </div>
           </div>
 
@@ -260,18 +254,18 @@ const CreateDatabaseMockModal = ({
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                 Target Proxy (Optional)
               </label>
-              <select
+              <ReliableSelect
                 value={formData.proxyPort}
                 onChange={(e) => handleInputChange("proxyPort", e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent dark:bg-gray-700 dark:text-white"
+                fullWidth
               >
-                <option value="">All proxies</option>
+                <MenuItem value="">All proxies</MenuItem>
                 {availableProxies.map((proxy) => (
-                  <option key={proxy.port} value={proxy.port}>
+                  <MenuItem key={proxy.port} value={proxy.port}>
                     {proxy.name} (Port {proxy.port})
-                  </option>
+                  </MenuItem>
                 ))}
-              </select>
+              </ReliableSelect>
               <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                 Leave empty to apply to all {formData.protocol} proxies
               </p>
@@ -303,7 +297,7 @@ const CreateDatabaseMockModal = ({
                   </button>
                 ))}
               </div>
-              <textarea
+              <ReliableInput
                 value={formData.pattern}
                 onChange={(e) => handleInputChange("pattern", e.target.value)}
                 placeholder={
@@ -313,12 +307,13 @@ const CreateDatabaseMockModal = ({
                     ? "SELECT * FROM users"
                     : "SELECT.*FROM\\s+users.*"
                 }
+                multiline
                 rows={3}
-                className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent font-mono text-sm ${
-                  errors.pattern
-                    ? "border-red-300 dark:border-red-600"
-                    : "border-gray-300 dark:border-gray-600"
-                } dark:bg-gray-700 dark:text-white`}
+                error={!!errors.pattern}
+                fullWidth
+                InputProps={{
+                  style: { fontFamily: "monospace", fontSize: "0.875rem" },
+                }}
               />
               {errors.pattern && (
                 <p className="mt-1 text-sm text-red-600 dark:text-red-400 flex items-center space-x-1">
@@ -375,18 +370,19 @@ const CreateDatabaseMockModal = ({
                     Generate Sample
                   </button>
                 </div>
-                <textarea
+                <ReliableInput
                   value={formData.response}
                   onChange={(e) =>
                     handleInputChange("response", e.target.value)
                   }
                   placeholder={generateSampleResponse()}
+                  multiline
                   rows={6}
-                  className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent font-mono text-sm ${
-                    errors.response
-                      ? "border-red-300 dark:border-red-600"
-                      : "border-gray-300 dark:border-gray-600"
-                  } dark:bg-gray-700 dark:text-white`}
+                  error={!!errors.response}
+                  fullWidth
+                  InputProps={{
+                    style: { fontFamily: "monospace", fontSize: "0.875rem" },
+                  }}
                 />
                 {errors.response && (
                   <p className="mt-1 text-sm text-red-600 dark:text-red-400 flex items-center space-x-1">
@@ -403,12 +399,13 @@ const CreateDatabaseMockModal = ({
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
               Description (Optional)
             </label>
-            <textarea
+            <ReliableInput
               value={formData.description}
               onChange={(e) => handleInputChange("description", e.target.value)}
               placeholder="Describe what this mock does..."
+              multiline
               rows={2}
-              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent dark:bg-gray-700 dark:text-white"
+              fullWidth
             />
           </div>
 

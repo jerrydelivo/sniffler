@@ -1,5 +1,9 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
+import { ReliableInput, ReliableSelect } from "../common/ReliableInput";
+import { MenuItem } from "@mui/material";
+import { useModalFocusReliability } from "../../hooks/useInputReliability";
 import ConfirmationModal from "./ConfirmationModal";
+import ResponseModal from "./ResponseModal";
 
 function CreateRequestModal({ onClose, onRefreshRequests, onCreateMock }) {
   const [formData, setFormData] = useState({
@@ -16,6 +20,15 @@ function CreateRequestModal({ onClose, onRefreshRequests, onCreateMock }) {
   const [pendingMockData, setPendingMockData] = useState(null);
   const [successMessage, setSuccessMessage] = useState("");
   const [showSuccess, setShowSuccess] = useState(false);
+  const [responseModal, setResponseModal] = useState({
+    isOpen: false,
+    response: null,
+    request: null,
+  });
+  const modalRef = useRef(null);
+
+  // Enhanced modal focus management
+  useModalFocusReliability(true, modalRef);
 
   useEffect(() => {
     loadProxies();
@@ -85,6 +98,17 @@ function CreateRequestModal({ onClose, onRefreshRequests, onCreateMock }) {
         if (result.success) {
           // Show success message
           const message = `Request sent successfully! Status: ${result.response.statusCode}`;
+
+          // Show response modal with the response data
+          setResponseModal({
+            isOpen: true,
+            response: result.response,
+            request: {
+              method: formData.method,
+              url: formData.url,
+              proxyPort: parseInt(selectedProxy),
+            },
+          });
 
           // If request was successful and user wants to create a mock
           if (
@@ -205,10 +229,19 @@ function CreateRequestModal({ onClose, onRefreshRequests, onCreateMock }) {
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
-      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-2xl max-h-full overflow-auto border border-gray-200 dark:border-gray-700">
+      <div
+        ref={modalRef}
+        className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-2xl max-h-full overflow-auto border border-gray-200 dark:border-gray-700"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="modal-title"
+      >
         <div className="p-6">
           <div className="flex items-center justify-between mb-6 pb-4 border-b border-gray-200 dark:border-gray-700">
-            <h2 className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+            <h2
+              id="modal-title"
+              className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2"
+            >
               <span className="text-2xl">🚀</span>
               Send New Request
             </h2>
@@ -241,20 +274,21 @@ function CreateRequestModal({ onClose, onRefreshRequests, onCreateMock }) {
                   <span>🔌</span>
                   Proxy
                 </label>
-                <select
+                <ReliableSelect
                   value={selectedProxy}
                   onChange={(e) => setSelectedProxy(e.target.value)}
-                  className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
                   required
                   disabled={isLoading}
+                  autoFocus
+                  placeholder="Select Proxy"
+                  name="proxy"
                 >
-                  <option value="">Select Proxy</option>
                   {proxies.map((proxy) => (
-                    <option key={proxy.port} value={proxy.port}>
+                    <MenuItem key={proxy.port} value={proxy.port}>
                       {proxy.name} (Port: {proxy.port})
-                    </option>
+                    </MenuItem>
                   ))}
-                </select>
+                </ReliableSelect>
               </div>
 
               <div>
@@ -262,11 +296,11 @@ function CreateRequestModal({ onClose, onRefreshRequests, onCreateMock }) {
                   <span>🔧</span>
                   Method
                 </label>
-                <select
+                <ReliableSelect
                   value={formData.method}
                   onChange={(e) => updateBodyForMethod(e.target.value)}
-                  className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
                   disabled={isLoading}
+                  name="method"
                 >
                   {[
                     "GET",
@@ -277,11 +311,11 @@ function CreateRequestModal({ onClose, onRefreshRequests, onCreateMock }) {
                     "HEAD",
                     "OPTIONS",
                   ].map((method) => (
-                    <option key={method} value={method}>
+                    <MenuItem key={method} value={method}>
                       {method}
-                    </option>
+                    </MenuItem>
                   ))}
-                </select>
+                </ReliableSelect>
               </div>
             </div>
 
@@ -290,16 +324,17 @@ function CreateRequestModal({ onClose, onRefreshRequests, onCreateMock }) {
                 <span>🌐</span>
                 URL Path
               </label>
-              <input
+              <ReliableInput
                 type="text"
                 value={formData.url}
                 onChange={(e) =>
                   setFormData({ ...formData, url: e.target.value })
                 }
                 placeholder="/api/users"
-                className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 font-mono"
                 required
                 disabled={isLoading}
+                name="url"
+                style={{ fontFamily: "monospace" }}
               />
             </div>
 
@@ -308,15 +343,22 @@ function CreateRequestModal({ onClose, onRefreshRequests, onCreateMock }) {
                 <span>📋</span>
                 Request Headers (JSON)
               </label>
-              <textarea
+              <ReliableInput
                 value={formData.headers}
                 onChange={(e) =>
                   setFormData({ ...formData, headers: e.target.value })
                 }
                 rows={4}
-                className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-900 dark:bg-gray-950 text-green-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 font-mono text-sm"
+                multiline
                 placeholder='{\n  "Content-Type": "application/json",\n  "Authorization": "Bearer token"\n}'
                 disabled={isLoading}
+                name="headers"
+                style={{
+                  fontFamily: "monospace",
+                  fontSize: "14px",
+                  backgroundColor: "#111827",
+                  color: "#10b981",
+                }}
               />
             </div>
 
@@ -326,15 +368,22 @@ function CreateRequestModal({ onClose, onRefreshRequests, onCreateMock }) {
                   <span>📄</span>
                   Request Body
                 </label>
-                <textarea
+                <ReliableInput
                   value={formData.body}
                   onChange={(e) =>
                     setFormData({ ...formData, body: e.target.value })
                   }
                   rows={6}
-                  className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-900 dark:bg-gray-950 text-green-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 font-mono text-sm"
+                  multiline
                   placeholder="Request body content (JSON, text, etc.)"
                   disabled={isLoading}
+                  name="body"
+                  style={{
+                    fontFamily: "monospace",
+                    fontSize: "14px",
+                    backgroundColor: "#111827",
+                    color: "#10b981",
+                  }}
                 />
               </div>
             )}
@@ -402,6 +451,20 @@ function CreateRequestModal({ onClose, onRefreshRequests, onCreateMock }) {
         confirmText="Create Mock"
         cancelText="Skip"
         type="default"
+      />
+
+      {/* Response Modal */}
+      <ResponseModal
+        isOpen={responseModal.isOpen}
+        onClose={() =>
+          setResponseModal({
+            isOpen: false,
+            response: null,
+            request: null,
+          })
+        }
+        response={responseModal.response}
+        request={responseModal.request}
       />
     </div>
   );

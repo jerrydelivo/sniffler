@@ -1,5 +1,25 @@
-const { app, BrowserWindow, Menu, ipcMain, dialog } = require("electron");
+const {
+  app,
+  BrowserWindow,
+  Menu,
+  ipcMain,
+  dialog,
+  shell,
+  nativeImage,
+} = require("electron");
 const path = require("path");
+// Load environment variables from apps/main/.env to configure runtime (e.g., licensing API URL)
+try {
+  const dotenv = require("dotenv");
+  dotenv.config({ path: path.join(__dirname, ".env") });
+  if (process.env.SNIFFLER_LICENSING_API_URL) {
+    console.log(
+      `🔧 Loaded SNIFFLER_LICENSING_API_URL from .env: ${process.env.SNIFFLER_LICENSING_API_URL}`
+    );
+  }
+} catch (e) {
+  // Optional: dotenv not strictly required in production packaged app
+}
 const fs = require("fs").promises;
 const SnifflerProxy = require("./proxy");
 const DatabaseSniffer = require("./database-sniffer");
@@ -9,6 +29,7 @@ const ProxyManager = require("./proxy-manager");
 const OutgoingInterceptor = require("./outgoing-interceptor");
 const { shouldCreateMockForRequest } = require("./requestPatterns");
 const SnifflerAutoUpdater = require("./auto-updater");
+const LicenseManager = require("./license-manager");
 
 // Helper function to safely serialize request data for IPC
 const sanitizeRequestForIPC = (request) => {
@@ -34,6 +55,11 @@ const sanitizeRequestForIPC = (request) => {
   return sanitized;
 };
 
+// Register custom protocol for deep linking
+console.log(`🔗 [STARTUP] Registering sniffler:// protocol handler...`);
+const protocolResult = app.setAsDefaultProtocolClient("sniffler");
+console.log(`🔗 [STARTUP] Protocol registration result: ${protocolResult}`);
+
 // Global error handlers to catch uncaught exceptions and promise rejections
 process.on("uncaughtException", (error) => {
   // console.error("💥 Uncaught Exception:", error);
@@ -48,6 +74,7 @@ process.on("unhandledRejection", (reason, promise) => {
 
 let mainWindow;
 let autoUpdater;
+let licenseManager;
 const proxies = new Map();
 const databaseSniffer = new DatabaseSniffer();
 const databaseProxyInterceptor = new DatabaseProxyInterceptor();
@@ -55,6 +82,17 @@ const dataManager = new DataManager();
 const proxyManager = new ProxyManager();
 const outgoingInterceptor = new OutgoingInterceptor();
 const appVersion = require("../../package.json").version;
+
+// Ensure Windows uses our App User Model ID so taskbar/title icons are correct
+try {
+  if (process.platform === "win32") {
+    app.setAppUserModelId("com.sniffle.app");
+  }
+} catch {}
+
+// Determine if developer tools should be enabled (dev-only)
+// This is controlled via the SNIFFLER_DEVTOOLS env var, which we set in the dev script.
+const devToolsEnabled = process.env.SNIFFLER_DEVTOOLS === "1";
 
 // Helper function to save settings
 const saveSettings = async () => {
@@ -80,6 +118,101 @@ const configureStartup = (enable) => {
   }
 };
 
+// Handle custom protocol URLs (sniffler://)
+const handleProtocolUrl = (url) => {
+  try {
+    console.log(`🔗 [PROTOCOL HANDLER] Processing protocol URL: ${url}`);
+    console.log(
+      `🔗 [PROTOCOL HANDLER] URL received at: ${new Date().toISOString()}`
+    );
+
+    const urlObj = new URL(url);
+    const protocol = urlObj.protocol; // 'sniffler:'
+    const action = urlObj.hostname; // e.g., 'payment-success'
+    const searchParams = urlObj.searchParams;
+
+    console.log(
+      `🔗 [PROTOCOL HANDLER] Protocol: ${protocol}, Action: ${action}`
+    );
+
+    // Handle different actions
+    switch (action) {
+      case "payment-success":
+        const sessionId = searchParams.get("session_id");
+        console.log(`💳 Payment success detected, session ID: ${sessionId}`);
+
+        // Focus the main window
+        if (mainWindow) {
+          if (mainWindow.isMinimized()) mainWindow.restore();
+          mainWindow.focus();
+          mainWindow.show(); // Ensure window is visible
+
+          // Send payment success event to renderer
+          mainWindow.webContents.send("stripe-payment-success", {
+            sessionId: sessionId,
+            timestamp: new Date().toISOString(),
+          });
+
+          // Also show a system notification
+          const { Notification } = require("electron");
+          if (Notification.isSupported()) {
+            new Notification({
+              title: "Payment Successful!",
+              body: "Your Sniffler Pro license is being activated...",
+              icon: path.join(__dirname, "../../build/icon.png"),
+            }).show();
+          }
+
+          console.log(`📤 Sent payment success event to renderer`);
+        } else {
+          console.warn(
+            `⚠️ Cannot handle payment success - main window not available`
+          );
+        }
+        break;
+
+      case "payment-cancelled":
+        console.log(`💳 Payment cancelled detected`);
+
+        // Focus the main window
+        if (mainWindow) {
+          if (mainWindow.isMinimized()) mainWindow.restore();
+          mainWindow.focus();
+
+          // Send payment cancelled event to renderer
+          mainWindow.webContents.send("stripe-payment-cancelled", {
+            timestamp: new Date().toISOString(),
+          });
+
+          console.log(`📤 Sent payment cancelled event to renderer`);
+        } else {
+          console.warn(
+            `⚠️ Cannot handle payment cancellation - main window not available`
+          );
+        }
+        break;
+
+      default:
+        console.warn(`⚠️ Unknown protocol action: ${action}`);
+
+        // Still focus the window if it's available
+        if (mainWindow) {
+          if (mainWindow.isMinimized()) mainWindow.restore();
+          mainWindow.focus();
+        }
+        break;
+    }
+  } catch (error) {
+    console.error(`❌ Error handling protocol URL: ${error.message}`);
+
+    // Still try to focus the window on any protocol URL
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+    }
+  }
+};
+
 // App settings with defaults
 let appSettings = {
   autoStartProxy: true, // Re-enabled - was disabled for debugging
@@ -97,7 +230,7 @@ let appSettings = {
   filterDatabaseHealthChecks: true, // Filter out database health check queries like SELECT NOW()
   // Auto-update settings
   autoCheckForUpdates: true, // Check for updates automatically
-  updateCheckInterval: 24, // Check every 24 hours
+  updateCheckInterval: 12, // Check every 12 hours (and also once shortly after startup)
   autoDownloadUpdates: false, // Don't auto-download (ask user first)
   autoInstallUpdates: false, // Don't auto-install (ask user first)
 };
@@ -121,12 +254,12 @@ function initializeInterceptors() {
   });
 }
 
-// License info (trial mode by default)
+// License info - will be updated by license manager
 let licenseInfo = {
-  type: "trial",
-  daysRemaining: 30,
-  licensedTo: null,
-  expiryDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+  type: "free",
+  isPremium: false,
+  status: "free",
+  message: "Free version - some features limited",
   isValid: true,
 };
 
@@ -190,81 +323,8 @@ async function loadPersistedProxies() {
           proxy.requests = savedRequests;
         }
 
-        // Set up event listeners
-        proxy.on("request", (request) => {
-          if (mainWindow) {
-            mainWindow.webContents.send("proxy-request", {
-              proxyId: config.port,
-              request,
-            });
-          }
-        });
-
-        proxy.on("response", (data) => {
-          if (mainWindow) {
-            mainWindow.webContents.send("proxy-response", {
-              proxyId: config.port,
-              request: data.request,
-              response: data.response,
-            });
-          }
-
-          // Auto-save requests (always enabled)
-          dataManager.saveRequests(
-            config.port,
-            proxy.getRequests(),
-            appSettings.maxRequestHistory
-          );
-        });
-
-        proxy.on("mock-served", (data) => {
-          if (mainWindow) {
-            mainWindow.webContents.send("mock-served", {
-              proxyId: config.port,
-              ...data,
-            });
-          }
-        });
-
-        proxy.on("mock-auto-created", async (data) => {
-          // Auto-save mocks to disk when created automatically
-          await dataManager.saveMocks(config.port, proxy.getMocks());
-          // Notify frontend about the new mock
-          if (mainWindow) {
-            mainWindow.webContents.send("mock-auto-created", {
-              proxyId: config.port,
-              mock: data.mock,
-              request: data.request,
-            });
-          }
-        });
-
-        proxy.on("mock-difference-detected", (data) => {
-          if (mainWindow) {
-            mainWindow.webContents.send("mock-difference-detected", {
-              proxyId: config.port,
-              request: data.request,
-              mock: data.mock,
-              comparison: data.comparison,
-            });
-          }
-        });
-
-        proxy.on("mock-auto-replaced", (data) => {
-          if (mainWindow) {
-            mainWindow.webContents.send("mock-auto-replaced", {
-              proxyId: config.port,
-              request: data.request,
-              oldMock: data.oldMock,
-              newMock: data.newMock,
-              comparison: data.comparison,
-            });
-          }
-        });
-
-        proxy.on("save-mocks", async () => {
-          await dataManager.saveMocks(config.port, proxy.getMocks());
-        });
+        // Set up event listeners for this proxy in a single, idempotent place
+        setupProxyEventListeners(config.port, proxy);
 
         proxies.set(config.port, {
           proxy,
@@ -392,18 +452,44 @@ function createWindow() {
     // Check if we should start hidden (for startup)
     const shouldStartHidden = process.argv.includes("--hidden");
 
+    // Determine proper window icon (avoid default Electron icon)
+    let windowIcon = undefined;
+    try {
+      const fsSync = require("fs");
+      const icoPath = path.join(__dirname, "../../build/icon.ico");
+      const pngPath = path.join(__dirname, "../../build/icon.png");
+
+      // On Windows, always use the .ico path for reliable title bar/taskbar icon
+      if (process.platform === "win32" && fsSync.existsSync(icoPath)) {
+        windowIcon = icoPath;
+      } else if (fsSync.existsSync(pngPath)) {
+        const pngImg = nativeImage.createFromPath(pngPath);
+        if (!pngImg.isEmpty()) {
+          windowIcon = pngImg;
+        }
+      }
+    } catch {}
+
     console.log("🔧 Creating BrowserWindow instance...");
     mainWindow = new BrowserWindow({
       width: 1200,
       height: 800,
       autoHideMenuBar: true,
       show: !shouldStartHidden, // Don't show if starting hidden
+      icon: windowIcon, // Use Sniffler app icon (dev); packaged apps use exe icon
       webPreferences: {
         preload: path.join(__dirname, "preload.js"),
         nodeIntegration: false,
         contextIsolation: true,
-        devTools: true, // Explicitly enable developer tools
+        devTools: devToolsEnabled, // Enable DevTools only in dev
+        webSecurity: true,
+        allowRunningInsecureContent: false,
+        experimentalFeatures: false,
       },
+      // Focus related settings
+      focusable: true,
+      skipTaskbar: false,
+      alwaysOnTop: false,
     });
 
     console.log(
@@ -416,6 +502,7 @@ function createWindow() {
         console.log("📡 Attempting to load development server...");
         await mainWindow.loadURL("http://localhost:8765");
         console.log("✅ Development server loaded successfully");
+        flushQueuedUiEvents();
       } catch (error) {
         console.log("⚠️ Development server failed, loading local file...");
         const rendererPath = path.join(
@@ -425,6 +512,7 @@ function createWindow() {
         console.log("📂 Renderer path:", rendererPath);
         await mainWindow.loadFile(rendererPath);
         console.log("✅ Local file loaded successfully");
+        flushQueuedUiEvents();
       }
     };
 
@@ -452,112 +540,192 @@ function createWindow() {
         autoCheck: appSettings.autoCheckForUpdates,
         checkInterval: appSettings.updateCheckInterval,
         autoDownload: appSettings.autoDownloadUpdates,
-        autoInstall: appSettings.autoInstallUpdates
+        autoInstall: appSettings.autoInstallUpdates,
       });
-      console.log('✅ Auto-updater initialized successfully');
+      console.log("✅ Auto-updater initialized successfully");
+      // Perform an immediate silent check on startup (in addition to scheduled one)
+      try {
+        autoUpdater.checkForUpdates(true);
+      } catch (e) {
+        // Swallow any early check errors silently
+      }
     } catch (error) {
-      console.error('❌ Failed to initialize auto-updater:', error);
+      console.error("❌ Failed to initialize auto-updater:", error);
     }
 
-    // Enable developer tools keyboard shortcuts
-    mainWindow.webContents.on("before-input-event", (event, input) => {
-      // F12 to toggle developer tools
-      if (input.key === "F12") {
-        mainWindow.webContents.toggleDevTools();
-      }
-      // Ctrl+Shift+I (Windows/Linux) or Cmd+Option+I (Mac) to toggle developer tools
-      if ((input.control || input.meta) && input.shift && input.key === "I") {
-        mainWindow.webContents.toggleDevTools();
-      }
-      // Ctrl+Shift+J (Windows/Linux) or Cmd+Option+J (Mac) to open console
-      if ((input.control || input.meta) && input.shift && input.key === "J") {
-        mainWindow.webContents.toggleDevTools();
-      }
-    });
+    // Enable developer tools keyboard shortcuts only in dev
+    if (devToolsEnabled) {
+      mainWindow.webContents.on("before-input-event", (event, input) => {
+        // F12 to toggle developer tools
+        if (input.key === "F12") {
+          mainWindow.webContents.toggleDevTools();
+        }
+        // Ctrl+Shift+I (Windows/Linux) or Cmd+Option+I (Mac) to toggle developer tools
+        if ((input.control || input.meta) && input.shift && input.key === "I") {
+          mainWindow.webContents.toggleDevTools();
+        }
+        // Ctrl+Shift+J (Windows/Linux) or Cmd+Option+J (Mac) to open console
+        if ((input.control || input.meta) && input.shift && input.key === "J") {
+          mainWindow.webContents.toggleDevTools();
+        }
+      });
+    }
 
     // Create application menu with developer tools option
-    const template = [
-      {
-        label: "View",
-        submenu: [
-          {
-            label: "Reload",
-            accelerator: "CmdOrCtrl+R",
-            click: () => {
-              mainWindow.webContents.reload();
-            },
-          },
-          {
-            label: "Force Reload",
-            accelerator: "CmdOrCtrl+Shift+R",
-            click: () => {
-              mainWindow.webContents.reloadIgnoringCache();
-            },
-          },
-          {
-            label: "Toggle Developer Tools",
-            accelerator:
-              process.platform === "darwin" ? "Alt+Cmd+I" : "Ctrl+Shift+I",
-            click: () => {
-              mainWindow.webContents.toggleDevTools();
-            },
-          },
-          { type: "separator" },
-          {
-            label: "Actual Size",
-            accelerator: "CmdOrCtrl+0",
-            click: () => {
-              mainWindow.webContents.setZoomLevel(0);
-            },
-          },
-          {
-            label: "Zoom In",
-            accelerator: "CmdOrCtrl+Plus",
-            click: () => {
-              const currentZoom = mainWindow.webContents.getZoomLevel();
-              mainWindow.webContents.setZoomLevel(currentZoom + 0.5);
-            },
-          },
-          {
-            label: "Zoom Out",
-            accelerator: "CmdOrCtrl+-",
-            click: () => {
-              const currentZoom = mainWindow.webContents.getZoomLevel();
-              mainWindow.webContents.setZoomLevel(currentZoom - 0.5);
-            },
-          },
-        ],
-      },
-    ];
-
-    // Set the application menu
-    const menu = Menu.buildFromTemplate(template);
-    Menu.setApplicationMenu(menu);
-
-    // Add context menu with developer tools option
-    mainWindow.webContents.on("context-menu", (event, params) => {
-      const contextMenu = Menu.buildFromTemplate([
+    // Build and set application menu only in dev
+    if (devToolsEnabled) {
+      const template = [
         {
-          label: "Inspect Element",
-          click: () => {
-            mainWindow.webContents.inspectElement(params.x, params.y);
-          },
+          label: "View",
+          submenu: [
+            {
+              label: "Reload",
+              accelerator: "CmdOrCtrl+R",
+              click: () => {
+                mainWindow.webContents.reload();
+              },
+            },
+            {
+              label: "Force Reload",
+              accelerator: "CmdOrCtrl+Shift+R",
+              click: () => {
+                mainWindow.webContents.reloadIgnoringCache();
+              },
+            },
+            {
+              label: "Toggle Developer Tools",
+              accelerator:
+                process.platform === "darwin" ? "Alt+Cmd+I" : "Ctrl+Shift+I",
+              click: () => {
+                mainWindow.webContents.toggleDevTools();
+              },
+            },
+            { type: "separator" },
+            {
+              label: "Actual Size",
+              accelerator: "CmdOrCtrl+0",
+              click: () => {
+                mainWindow.webContents.setZoomLevel(0);
+              },
+            },
+            {
+              label: "Zoom In",
+              accelerator: "CmdOrCtrl+Plus",
+              click: () => {
+                const currentZoom = mainWindow.webContents.getZoomLevel();
+                mainWindow.webContents.setZoomLevel(currentZoom + 0.5);
+              },
+            },
+            {
+              label: "Zoom Out",
+              accelerator: "CmdOrCtrl+-",
+              click: () => {
+                const currentZoom = mainWindow.webContents.getZoomLevel();
+                mainWindow.webContents.setZoomLevel(currentZoom - 0.5);
+              },
+            },
+          ],
         },
-        { type: "separator" },
+      ];
+
+      const menu = Menu.buildFromTemplate(template);
+      Menu.setApplicationMenu(menu);
+    }
+
+    // Add context menu; include inspect/devtools only in dev
+    mainWindow.webContents.on("context-menu", (event, params) => {
+      const baseItems = [
         {
           label: "Reload",
           click: () => {
             mainWindow.webContents.reload();
           },
         },
-        {
-          label: "Toggle Developer Tools",
-          click: () => {
-            mainWindow.webContents.toggleDevTools();
-          },
-        },
-      ]);
+      ];
+
+      const devItems = devToolsEnabled
+        ? [
+            { type: "separator" },
+            {
+              label: "Inspect Element",
+              click: () => {
+                mainWindow.webContents.inspectElement(params.x, params.y);
+              },
+            },
+            {
+              label: "Toggle Developer Tools",
+              click: () => {
+                mainWindow.webContents.toggleDevTools();
+              },
+            },
+          ]
+        : [];
+
+      const contextMenu = Menu.buildFromTemplate([...baseItems, ...devItems]);
       contextMenu.popup();
+    });
+
+    // Handle mouse back/forward buttons on Windows
+    // Prevent navigating to a blank page by only going back/forward if history exists
+    mainWindow.on("app-command", (event, command) => {
+      try {
+        if (command === "browser-backward") {
+          // Prevent any default navigation
+          if (event && typeof event.preventDefault === "function") {
+            event.preventDefault();
+          }
+          if (mainWindow.webContents.canGoBack()) {
+            mainWindow.webContents.goBack();
+          }
+          // If there's no history, do nothing
+        } else if (command === "browser-forward") {
+          if (event && typeof event.preventDefault === "function") {
+            event.preventDefault();
+          }
+          if (mainWindow.webContents.canGoForward()) {
+            mainWindow.webContents.goForward();
+          }
+        }
+      } catch (e) {
+        // Swallow any errors to avoid crashing on input handling
+      }
+    });
+
+    // Intercept keyboard back/forward (Alt+Left/Right, BrowserBack/Forward)
+    mainWindow.webContents.on("before-input-event", (event, input) => {
+      try {
+        const isBack =
+          input.key === "BrowserBack" ||
+          (input.alt && input.code === "ArrowLeft");
+        const isForward =
+          input.key === "BrowserForward" ||
+          (input.alt && input.code === "ArrowRight");
+
+        if (isBack) {
+          event.preventDefault();
+          if (mainWindow.webContents.canGoBack()) {
+            mainWindow.webContents.goBack();
+          }
+        } else if (isForward) {
+          event.preventDefault();
+          if (mainWindow.webContents.canGoForward()) {
+            mainWindow.webContents.goForward();
+          }
+        }
+      } catch (e) {
+        // ignore
+      }
+    });
+
+    // Safety: block accidental navigation to about:blank
+    mainWindow.webContents.on("will-navigate", (event, url) => {
+      try {
+        if (url === "about:blank" || url === "about:blank#blocked") {
+          event.preventDefault();
+        }
+      } catch (e) {
+        // ignore
+      }
     });
 
     // Handle window close
@@ -618,6 +786,56 @@ function createWindow() {
   }
 }
 
+// Initialize license manager
+async function initializeLicenseManager() {
+  try {
+    console.log("🔐 Initializing license manager...");
+    licenseManager = new LicenseManager();
+
+    // Initialize and check license
+    const status = await licenseManager.initialize();
+    licenseInfo = {
+      ...licenseInfo,
+      ...status,
+      ...licenseManager.getLicenseInfo(),
+    };
+
+    console.log("🔐 License status:", licenseInfo);
+
+    // Send license status to renderer if window is ready
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send("license-status-changed", licenseInfo);
+    }
+  } catch (error) {
+    console.error("❌ Failed to initialize license manager:", error);
+    // Fallback to free version
+    licenseInfo = {
+      type: "free",
+      isPremium: false,
+      status: "free",
+      message: "Free version - some features limited",
+      isValid: true,
+    };
+  }
+}
+
+// Check if feature is premium-only
+function isPremiumFeature(feature) {
+  // Allow premium features for both licensed premium users and trial users
+  if (!licenseInfo.isPremium && !licenseInfo.isTrial) {
+    const premiumFeatures = [
+      "mock-creation",
+      "mock-management",
+      "database-proxies",
+      "outgoing-requests",
+      "export-import",
+      "advanced-features",
+    ];
+    return premiumFeatures.includes(feature);
+  }
+  return false;
+}
+
 // IPC handlers for proxy management
 ipcMain.handle(
   "start-proxy",
@@ -672,73 +890,8 @@ ipcMain.handle(
 
       await proxy.start();
 
-      proxy.on("request", (request) => {
-        if (mainWindow) {
-          mainWindow.webContents.send("proxy-request", {
-            proxyId: port,
-            request,
-          });
-        }
-      });
-
-      proxy.on("response", (data) => {
-        if (mainWindow) {
-          mainWindow.webContents.send("proxy-response", {
-            proxyId: port,
-            request: data.request,
-            response: data.response,
-          });
-        }
-      });
-
-      proxy.on("mock-served", (data) => {
-        if (mainWindow) {
-          mainWindow.webContents.send("mock-served", {
-            proxyId: port,
-            ...data,
-          });
-        }
-      });
-
-      proxy.on("mock-auto-created", async (data) => {
-        // Auto-save mocks to disk when created automatically
-        await dataManager.saveMocks(port, proxy.getMocks());
-        // Notify frontend about the new mock
-        if (mainWindow) {
-          mainWindow.webContents.send("mock-auto-created", {
-            proxyId: port,
-            mock: data.mock,
-            request: data.request,
-          });
-        }
-      });
-
-      proxy.on("mock-difference-detected", (data) => {
-        if (mainWindow) {
-          mainWindow.webContents.send("mock-difference-detected", {
-            proxyId: port,
-            request: data.request,
-            mock: data.mock,
-            comparison: data.comparison,
-          });
-        }
-      });
-
-      proxy.on("mock-auto-replaced", (data) => {
-        if (mainWindow) {
-          mainWindow.webContents.send("mock-auto-replaced", {
-            proxyId: port,
-            request: data.request,
-            oldMock: data.oldMock,
-            newMock: data.newMock,
-            comparison: data.comparison,
-          });
-        }
-      });
-
-      proxy.on("save-mocks", async () => {
-        await dataManager.saveMocks(port, proxy.getMocks());
-      });
+      // Centralized listener setup to avoid duplicates
+      setupProxyEventListeners(port, proxy);
 
       proxy.on("error", (errorData) => {
         if (mainWindow) {
@@ -1036,6 +1189,130 @@ ipcMain.handle("update-proxy-name", async (event, port, newName) => {
   return { success: false, error: "Proxy not found" };
 });
 
+// Handler to update proxy configuration (name, port, target host/port)
+ipcMain.handle("update-proxy-config", async (event, port, updates) => {
+  const proxyData = proxies.get(port);
+  if (proxyData) {
+    try {
+      // Only allow updates when proxy is disabled or stopped
+      if (!proxyData.disabled && proxyData.proxy.isRunning) {
+        return {
+          success: false,
+          error:
+            "Cannot update running proxy configuration. Disable the proxy first.",
+        };
+      }
+
+      // Check if port is being changed
+      const newPort = updates.port ? parseInt(updates.port) : port;
+
+      // Validate new port if being changed
+      if (updates.port !== undefined && newPort !== port) {
+        if (newPort < 1 || newPort > 65535) {
+          return {
+            success: false,
+            error: "Port must be between 1 and 65535",
+          };
+        }
+
+        // Check if new port is already in use
+        if (proxies.has(newPort)) {
+          return {
+            success: false,
+            error: `Port ${newPort} is already in use by another proxy`,
+          };
+        }
+      }
+
+      // Validate target configuration to prevent circular proxy loops
+      if (updates.targetHost && updates.targetPort) {
+        const targetHost = updates.targetHost;
+        const targetPort = parseInt(updates.targetPort);
+
+        if (
+          (targetHost === "localhost" || targetHost === "127.0.0.1") &&
+          targetPort === newPort
+        ) {
+          return {
+            success: false,
+            error: `Cannot target ${targetHost}:${targetPort}. This would create an infinite loop.`,
+          };
+        }
+      }
+
+      // If port is being changed, we need to create a new proxy and remove the old one
+      if (updates.port !== undefined && newPort !== port) {
+        // Create new proxy data with updated values
+        const newProxyData = {
+          ...proxyData,
+          port: newPort,
+          name: updates.name !== undefined ? updates.name : proxyData.name,
+          targetHost:
+            updates.targetHost !== undefined
+              ? updates.targetHost
+              : proxyData.targetHost,
+          targetPort:
+            updates.targetPort !== undefined
+              ? parseInt(updates.targetPort)
+              : proxyData.targetPort,
+        };
+
+        // Create new proxy instance
+        const newProxy = new SnifflerProxy({
+          port: newPort,
+          name: newProxyData.name,
+          targetHost: newProxyData.targetHost,
+          targetPort: newProxyData.targetPort,
+          isRunning: false,
+          maxRequestHistory: appSettings.maxRequestHistory,
+          maxMockHistory: appSettings.maxMockHistory,
+          autoSaveAsMocks: appSettings.autoSaveRequestsAsMocks,
+          autoReplaceMocksOnDifference:
+            appSettings.autoReplaceMocksOnDifference,
+        });
+
+        newProxyData.proxy = newProxy;
+
+        // Add new proxy and remove old one
+        proxies.set(newPort, newProxyData);
+        proxies.delete(port);
+
+        // Save the updated proxy configuration
+        await saveProxyConfigurations();
+
+        return {
+          success: true,
+          portChanged: true,
+          oldPort: port,
+          newPort: newPort,
+        };
+      } else {
+        // Update existing proxy data (no port change)
+        if (updates.name !== undefined) {
+          proxyData.name = updates.name;
+        }
+        if (updates.targetHost !== undefined) {
+          proxyData.targetHost = updates.targetHost;
+          proxyData.proxy.targetHost = updates.targetHost;
+        }
+        if (updates.targetPort !== undefined) {
+          const targetPort = parseInt(updates.targetPort);
+          proxyData.targetPort = targetPort;
+          proxyData.proxy.targetPort = targetPort;
+        }
+
+        // Save the updated proxy configuration
+        await saveProxyConfigurations();
+
+        return { success: true };
+      }
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  }
+  return { success: false, error: "Proxy not found" };
+});
+
 // New handler to update proxy auto-start setting
 ipcMain.handle("update-proxy-auto-start", async (event, port, autoStart) => {
   const proxyData = proxies.get(port);
@@ -1224,6 +1501,16 @@ ipcMain.handle("delete-proxy", async (event, port) => {
 
 // Mock management handlers
 ipcMain.handle("add-mock", async (event, { port, method, url, response }) => {
+  // Check if user has premium access for mock creation
+  if (isPremiumFeature("mock-creation")) {
+    return {
+      success: false,
+      error:
+        "Mock creation requires a premium license. Upgrade to unlock this feature.",
+      isPremiumFeature: true,
+    };
+  }
+
   const proxyData = proxies.get(port);
   if (proxyData) {
     // Check pattern matching if enabled
@@ -1334,7 +1621,12 @@ ipcMain.handle("clear-requests", async (event, port) => {
 ipcMain.handle("get-requests", async (event, port) => {
   const proxyData = proxies.get(port);
   if (proxyData) {
-    return { success: true, requests: proxyData.proxy.getRequests() };
+    // Normalize request statuses for UI compatibility (completed -> success)
+    const normalized = proxyData.proxy.getRequests().map((r) => ({
+      ...r,
+      status: r?.status === "completed" ? "success" : r?.status,
+    }));
+    return { success: true, requests: normalized };
   }
   return { success: false, error: "Proxy not found" };
 });
@@ -1631,54 +1923,339 @@ ipcMain.handle("get-app-version", () => {
   return appVersion;
 });
 
+// License management IPC handlers
 ipcMain.handle("get-license-info", () => {
-  // Update days remaining
-  const now = new Date();
-  const expiry = new Date(licenseInfo.expiryDate);
-  const daysRemaining = Math.max(
-    0,
-    Math.ceil((expiry - now) / (1000 * 60 * 60 * 24))
-  );
+  if (!licenseManager) {
+    return licenseInfo;
+  }
 
   return {
     ...licenseInfo,
-    daysRemaining,
-    isValid: daysRemaining > 0 || licenseInfo.type === "full",
+    ...licenseManager.getLicenseInfo(),
   };
 });
 
-ipcMain.handle("purchase-license", async (event, data) => {
-  // This would integrate with a payment processor in a real app
-  // For now, simulate a successful purchase
-  licenseInfo = {
-    type: "full",
-    daysRemaining: 365,
-    licensedTo: data.email,
-    expiryDate: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(),
-    isValid: true,
-  };
+ipcMain.handle("check-license-status", async () => {
+  if (!licenseManager) {
+    return { success: false, error: "License manager not initialized" };
+  }
 
-  return { success: true, licenseInfo };
+  try {
+    const status = await licenseManager.checkLicense();
+    licenseInfo = {
+      ...licenseInfo,
+      ...status,
+      ...licenseManager.getLicenseInfo(),
+    };
+
+    // Send updated status to renderer
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send("license-status-changed", licenseInfo);
+    }
+
+    return { success: true, license: licenseInfo };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle("set-license-key", async (event, licenseKey) => {
+  if (!licenseManager) {
+    return { success: false, error: "License manager not initialized" };
+  }
+
+  try {
+    const status = await licenseManager.setLicenseKey(licenseKey);
+    licenseInfo = {
+      ...licenseInfo,
+      ...status,
+      ...licenseManager.getLicenseInfo(),
+    };
+
+    // Send updated status to renderer
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send("license-status-changed", licenseInfo);
+    }
+
+    return { success: true, license: licenseInfo };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle("remove-license-key", async () => {
+  if (!licenseManager) {
+    return { success: false, error: "License manager not initialized" };
+  }
+
+  try {
+    // Clear both key and email to avoid partial state and race conditions
+    const status = await licenseManager.clearLicense();
+    licenseInfo = {
+      ...licenseInfo,
+      ...status,
+      ...licenseManager.getLicenseInfo(),
+    };
+
+    // Send updated status to renderer
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send("license-status-changed", licenseInfo);
+    }
+
+    return { success: true, license: licenseInfo };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+// Optional explicit clear endpoint for future use
+ipcMain.handle("clear-license", async () => {
+  if (!licenseManager) {
+    return { success: false, error: "License manager not initialized" };
+  }
+  try {
+    const status = await licenseManager.clearLicense();
+    licenseInfo = {
+      ...licenseInfo,
+      ...status,
+      ...licenseManager.getLicenseInfo(),
+    };
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send("license-status-changed", licenseInfo);
+    }
+    return { success: true, license: licenseInfo };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+// Email-based license activation handlers
+ipcMain.handle("set-license-email", async (event, email) => {
+  if (!licenseManager) {
+    return { success: false, error: "License manager not initialized" };
+  }
+
+  try {
+    const status = await licenseManager.setLicenseEmail(email);
+    licenseInfo = {
+      ...licenseInfo,
+      ...status,
+      ...licenseManager.getLicenseInfo(),
+    };
+
+    // Send updated status to renderer
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send("license-status-changed", licenseInfo);
+    }
+
+    return { success: true, license: licenseInfo };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle("remove-license-email", async () => {
+  if (!licenseManager) {
+    return { success: false, error: "License manager not initialized" };
+  }
+
+  try {
+    const status = await licenseManager.removeLicenseEmail();
+    licenseInfo = {
+      ...licenseInfo,
+      ...status,
+      ...licenseManager.getLicenseInfo(),
+    };
+
+    // Send updated status to renderer
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send("license-status-changed", licenseInfo);
+    }
+
+    return { success: true, license: licenseInfo };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle("start-free-trial", async () => {
+  if (!licenseManager) {
+    return { success: false, error: "License manager not initialized" };
+  }
+
+  try {
+    const status = await licenseManager.startTrial();
+    licenseInfo = {
+      ...licenseInfo,
+      ...status,
+      ...licenseManager.getLicenseInfo(),
+    };
+
+    // Send updated status to renderer
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send("license-status-changed", licenseInfo);
+    }
+
+    return { success: true, license: licenseInfo };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle(
+  "create-checkout-session",
+  async (event, { planType, customerEmail }) => {
+    if (!licenseManager) {
+      return { success: false, error: "License manager not initialized" };
+    }
+
+    try {
+      const result = await licenseManager.createCheckoutSession(
+        planType,
+        customerEmail
+      );
+      return { success: true, ...result };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  }
+);
+
+ipcMain.handle("open-checkout-url", async (event, url) => {
+  try {
+    await shell.openExternal(url);
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle("is-premium-feature", (event, feature) => {
+  return isPremiumFeature(feature);
+});
+
+// Expose licensing API base for renderer to call admin endpoints consistently
+ipcMain.handle("get-licensing-api-base", async () => {
+  try {
+    if (licenseManager && licenseManager.apiBaseUrl) {
+      return { success: true, baseUrl: licenseManager.apiBaseUrl };
+    }
+    // Fallback: construct from env or default LicenseManager behavior
+    const defaultBase =
+      process.env.SNIFFLER_LICENSING_API_URL ||
+      "https://sniffler-licensing-api-preview.vercel.app/api";
+    const normalized = (defaultBase || "").replace(/\/+$/g, "");
+    return { success: true, baseUrl: normalized };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+// Handle Stripe payment success from custom protocol
+ipcMain.handle("process-payment-success", async (event, { sessionId }) => {
+  if (!licenseManager) {
+    return { success: false, error: "License manager not initialized" };
+  }
+
+  try {
+    console.log(`💳 Processing payment success for session: ${sessionId}`);
+
+    // Retrieve and automatically activate the license
+    const retrievalResult = await licenseManager.retrieveAndActivateLicense(
+      sessionId
+    );
+
+    if (retrievalResult.success && retrievalResult.activated) {
+      console.log(
+        `✅ License automatically activated: ${retrievalResult.licenseKey}`
+      );
+
+      // Update the license info
+      licenseInfo = {
+        ...licenseInfo,
+        ...retrievalResult,
+        ...licenseManager.getLicenseInfo(),
+      };
+
+      // Send updated status to renderer
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send("license-status-changed", licenseInfo);
+      }
+
+      return {
+        success: true,
+        license: licenseInfo,
+        licenseKey: retrievalResult.licenseKey,
+        allLicenseKeys: retrievalResult.allLicenseKeys,
+        message:
+          "Payment processed successfully! Your license has been activated automatically.",
+        sessionId: sessionId,
+        activated: true,
+      };
+    } else {
+      // Fallback to regular license check if automatic activation failed
+      console.log(
+        "⚠️ Automatic activation failed, falling back to regular check"
+      );
+      const licenseResult = await licenseManager.checkLicense();
+
+      // Update the license info
+      licenseInfo = {
+        ...licenseInfo,
+        ...licenseResult,
+        ...licenseManager.getLicenseInfo(),
+      };
+
+      // Send updated status to renderer
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send("license-status-changed", licenseInfo);
+      }
+
+      return {
+        success: true,
+        license: licenseInfo,
+        message:
+          "Payment processed successfully! Please check your email for license keys.",
+        sessionId: sessionId,
+        activated: false,
+      };
+    }
+  } catch (error) {
+    console.error(`❌ Error processing payment success: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+});
+
+// Handle Stripe payment cancellation from custom protocol
+ipcMain.handle("process-payment-cancelled", async (event) => {
+  console.log(`💳 Processing payment cancellation`);
+
+  return {
+    success: true,
+    message: "Payment was cancelled. You can try again anytime.",
+    cancelled: true,
+  };
 });
 
 ipcMain.handle("update-settings", async (event, newSettings) => {
   appSettings = { ...appSettings, ...newSettings };
-  
+
   // Update auto-updater settings if they changed
-  if (autoUpdater && (
-    'autoCheckForUpdates' in newSettings ||
-    'updateCheckInterval' in newSettings ||
-    'autoDownloadUpdates' in newSettings ||
-    'autoInstallUpdates' in newSettings
-  )) {
+  if (
+    autoUpdater &&
+    ("autoCheckForUpdates" in newSettings ||
+      "updateCheckInterval" in newSettings ||
+      "autoDownloadUpdates" in newSettings ||
+      "autoInstallUpdates" in newSettings)
+  ) {
     autoUpdater.updateSettings({
       autoCheck: appSettings.autoCheckForUpdates,
       checkInterval: appSettings.updateCheckInterval,
       autoDownload: appSettings.autoDownloadUpdates,
-      autoInstall: appSettings.autoInstallUpdates
+      autoInstall: appSettings.autoInstallUpdates,
     });
   }
-  
+
   await saveSettings();
   return { success: true, settings: appSettings };
 });
@@ -1688,12 +2265,30 @@ ipcMain.handle("check-for-updates", async (event, silent = false) => {
   if (!autoUpdater) {
     return { success: false, error: "Auto-updater not initialized" };
   }
-  
+
   try {
     const result = await autoUpdater.checkForUpdates(silent);
+    // Normalize result so renderer can decide the friendly modal copy
     return { success: true, ...result };
   } catch (error) {
-    return { success: false, error: error.message };
+    const message = String(error?.message || error || "");
+    const lower = message.toLowerCase();
+    // Common cases when updates are not configured/published (no latest.yml, not found, ENOENT, etc.)
+    const isNoArtifact =
+      lower.includes("latest.yml") ||
+      (lower.includes("not found") && lower.includes("release")) ||
+      lower.includes("enoent") ||
+      lower.includes("cannot find") ||
+      lower.includes("no such file") ||
+      lower.includes("404");
+
+    if (isNoArtifact) {
+      // Treat as "no update available" to avoid noisy errors in environments without a release feed
+      return { success: true, updateInfo: null, skipped: true };
+    }
+
+    // Fallback: return a friendly error without leaking internal details
+    return { success: false, error: "Update server not available" };
   }
 });
 
@@ -1701,7 +2296,7 @@ ipcMain.handle("download-update", async () => {
   if (!autoUpdater) {
     return { success: false, error: "Auto-updater not initialized" };
   }
-  
+
   try {
     autoUpdater.downloadUpdate(true);
     return { success: true };
@@ -1714,7 +2309,7 @@ ipcMain.handle("install-update", async () => {
   if (!autoUpdater) {
     return { success: false, error: "Auto-updater not initialized" };
   }
-  
+
   try {
     autoUpdater.installUpdate();
     return { success: true };
@@ -1727,7 +2322,7 @@ ipcMain.handle("get-update-status", async () => {
   if (!autoUpdater) {
     return { success: false, error: "Auto-updater not initialized" };
   }
-  
+
   try {
     const status = autoUpdater.getStatus();
     return { success: true, ...status };
@@ -1738,6 +2333,16 @@ ipcMain.handle("get-update-status", async () => {
 
 // File operation handlers
 ipcMain.handle("export-mocks", async (event, { port, filePath }) => {
+  // Check if user has premium access for export functionality
+  if (isPremiumFeature("export-import")) {
+    return {
+      success: false,
+      error:
+        "Mock export requires a premium license. Upgrade to unlock this feature.",
+      isPremiumFeature: true,
+    };
+  }
+
   try {
     const proxyData = proxies.get(port);
     if (!proxyData) {
@@ -1781,6 +2386,16 @@ ipcMain.handle("export-mocks", async (event, { port, filePath }) => {
 });
 
 ipcMain.handle("import-mocks", async (event, filePath) => {
+  // Check if user has premium access for import functionality
+  if (isPremiumFeature("export-import")) {
+    return {
+      success: false,
+      error:
+        "Mock import requires a premium license. Upgrade to unlock this feature.",
+      isPremiumFeature: true,
+    };
+  }
+
   try {
     let importFilePath = filePath;
     if (!importFilePath) {
@@ -1900,6 +2515,16 @@ ipcMain.handle("remove-certificate", async () => {
 
 // Data management handlers
 ipcMain.handle("export-all-data", async () => {
+  // Check if user has premium access for export/import
+  if (isPremiumFeature("export-import")) {
+    return {
+      success: false,
+      error:
+        "Export/Import requires a premium license. Upgrade to unlock this feature.",
+      isPremiumFeature: true,
+    };
+  }
+
   try {
     const exportData = await dataManager.exportAllData();
 
@@ -2121,6 +2746,16 @@ ipcMain.handle("export-single-project", async (event, port) => {
 });
 
 ipcMain.handle("copy-project-mocks", async (event, fromPort, toPort) => {
+  // Check if user has premium access for mock copying
+  if (isPremiumFeature("mock-creation")) {
+    return {
+      success: false,
+      error:
+        "Copying project mocks requires a premium license. Upgrade to unlock this feature.",
+      isPremiumFeature: true,
+    };
+  }
+
   try {
     const sourceMocks = await dataManager.loadMocks(fromPort);
     if (sourceMocks && sourceMocks.length > 0) {
@@ -2230,13 +2865,24 @@ ipcMain.handle("save-settings", async (event, settings) => {
   }
 });
 
-// Developer tools handlers
+// Developer tools handlers (dev only)
 ipcMain.handle("toggle-dev-tools", () => {
+  if (!devToolsEnabled) {
+    return {
+      success: false,
+      error: "Developer tools are disabled in production",
+    };
+  }
   if (mainWindow) {
     mainWindow.webContents.toggleDevTools();
     return { success: true };
   }
   return { success: false, error: "Main window not available" };
+});
+
+// Expose dev tools enabled flag to renderer
+ipcMain.handle("is-dev-tools-enabled", () => {
+  return { success: true, enabled: !!devToolsEnabled };
 });
 
 // Test handler to manually save outgoing proxies
@@ -2351,6 +2997,12 @@ ipcMain.handle("get-testing-mode", async () => {
 });
 
 ipcMain.handle("open-dev-tools", () => {
+  if (!devToolsEnabled) {
+    return {
+      success: false,
+      error: "Developer tools are disabled in production",
+    };
+  }
   if (mainWindow) {
     mainWindow.webContents.openDevTools();
     return { success: true };
@@ -2359,6 +3011,10 @@ ipcMain.handle("open-dev-tools", () => {
 });
 
 ipcMain.handle("close-dev-tools", () => {
+  if (!devToolsEnabled) {
+    // It's safe to no-op if disabled
+    return { success: true };
+  }
   if (mainWindow) {
     mainWindow.webContents.closeDevTools();
     return { success: true };
@@ -2481,6 +3137,16 @@ ipcMain.handle("get-database-proxy-mocks", async (event, proxyPort) => {
 ipcMain.handle(
   "create-database-proxy",
   async (event, { port, targetHost, targetPort, protocol, name }) => {
+    // Check if user has premium access for database proxies
+    if (isPremiumFeature("database-proxies")) {
+      return {
+        success: false,
+        error:
+          "Database proxies require a premium license. Upgrade to unlock this feature.",
+        isPremiumFeature: true,
+      };
+    }
+
     try {
       const proxy = databaseProxyInterceptor.createDatabaseProxy({
         port,
@@ -2785,6 +3451,16 @@ ipcMain.handle("set-database-testing-mode", async (event, enabled) => {
 
 // New Database Mock Management Handlers for UI
 ipcMain.handle("create-database-mock", async (event, mockData) => {
+  // Check if user has premium access for mock creation
+  if (isPremiumFeature("mock-creation")) {
+    return {
+      success: false,
+      error:
+        "Database mock creation requires a premium license. Upgrade to unlock this feature.",
+      isPremiumFeature: true,
+    };
+  }
+
   try {
     const mock = databaseProxyInterceptor.addDatabaseMock(
       mockData.proxyPort,
@@ -3375,6 +4051,16 @@ ipcMain.handle("get-outgoing-mocks", async (event, proxyPort = null) => {
 ipcMain.handle(
   "add-outgoing-mock",
   async (event, { proxyPort, method, url, response }) => {
+    // Check if user has premium access for outgoing mock creation
+    if (isPremiumFeature("outgoing-requests")) {
+      return {
+        success: false,
+        error:
+          "Outgoing mock creation requires a premium license. Upgrade to unlock this feature.",
+        isPremiumFeature: true,
+      };
+    }
+
     try {
       const result = outgoingInterceptor.addOutgoingMock(
         proxyPort,
@@ -3456,6 +4142,16 @@ ipcMain.handle("set-outgoing-testing-mode", async (event, enabled) => {
 ipcMain.handle(
   "create-outgoing-mock-from-request",
   async (event, requestId) => {
+    // Check if user has premium access for outgoing mock creation
+    if (isPremiumFeature("outgoing-requests")) {
+      return {
+        success: false,
+        error:
+          "Creating mocks from outgoing requests requires a premium license. Upgrade to unlock this feature.",
+        isPremiumFeature: true,
+      };
+    }
+
     try {
       const requests = outgoingInterceptor.getInterceptedRequests();
       const request = requests.find((r) => r.id === requestId);
@@ -3798,6 +4494,30 @@ async function initializeOutgoingProxies() {
             request,
             mock,
           });
+        }
+      }
+    );
+
+    outgoingInterceptor.on(
+      "outgoing-mock-difference-detected",
+      ({ request, mock, comparison, proxyPort }) => {
+        console.log(
+          `📢 Main process received outgoing-mock-difference-detected event for proxy ${proxyPort}`
+        );
+        if (mainWindow) {
+          console.log(
+            `📤 Sending outgoing-mock-difference-detected to renderer for proxy ${proxyPort}`
+          );
+          mainWindow.webContents.send("outgoing-mock-difference-detected", {
+            request,
+            mock,
+            comparison,
+            proxyPort,
+          });
+        } else {
+          console.log(
+            `❌ Cannot send outgoing-mock-difference-detected - mainWindow is null`
+          );
         }
       }
     );
@@ -4238,91 +4958,42 @@ ipcMain.handle("import-all-proxy-configs", async () => {
   }
 });
 
-// Helper function to set up proxy event listeners
-function setupProxyEventListeners(port, proxy) {
-  if (!mainWindow) {
-    console.warn(
-      `⚠️ Cannot set up event listeners for proxy ${port}: mainWindow not available`
-    );
-    return;
+// Queue UI events until mainWindow is ready to receive them
+let __queuedUiEvents = [];
+function safeSend(channel, data) {
+  if (mainWindow && mainWindow.webContents) {
+    try {
+      mainWindow.webContents.send(channel, data);
+      return;
+    } catch (e) {
+      // fallthrough to queue
+    }
   }
+  __queuedUiEvents.push({ channel, data });
+}
 
-  console.log(`🔌 Setting up event listeners for proxy on port ${port}`);
-
-  proxy.on("request", (request) => {
-    if (mainWindow) {
-      mainWindow.webContents.send("proxy-request", {
-        proxyId: port,
-        request,
-      });
+function flushQueuedUiEvents() {
+  if (!mainWindow || !mainWindow.webContents) return;
+  if (__queuedUiEvents.length === 0) return;
+  try {
+    for (const evt of __queuedUiEvents) {
+      mainWindow.webContents.send(evt.channel, evt.data);
     }
+  } finally {
+    __queuedUiEvents = [];
+  }
+}
+
+// Helper function to set up proxy event listeners (delegates to reusable module)
+const { setupProxyEventListeners: _setup } = require("./proxy-listeners");
+function setupProxyEventListeners(port, proxy) {
+  // Pass a proxy object that uses safeSend so events don't get lost before window is ready
+  const mainWindowProxy = { webContents: { send: safeSend } };
+  _setup(port, proxy, {
+    mainWindow: mainWindowProxy,
+    dataManager,
+    appSettings,
   });
-
-  proxy.on("response", (data) => {
-    if (mainWindow) {
-      mainWindow.webContents.send("proxy-response", {
-        proxyId: port,
-        request: data.request,
-        response: data.response,
-      });
-    }
-
-    // Auto-save requests (always enabled)
-    dataManager
-      .saveRequests(port, proxy.getRequests(), appSettings.maxRequestHistory)
-      .catch((error) => {
-        console.warn(`Failed to save requests for proxy ${port}:`, error);
-      });
-  });
-
-  proxy.on("mock-served", (data) => {
-    if (mainWindow) {
-      mainWindow.webContents.send("mock-served", {
-        proxyId: port,
-        ...data,
-      });
-    }
-  });
-
-  proxy.on("mock-auto-created", async (data) => {
-    // Auto-save mocks to disk when created automatically
-    try {
-      await dataManager.saveMocks(port, proxy.getMocks());
-      // Notify frontend about the new mock
-      if (mainWindow) {
-        mainWindow.webContents.send("mock-auto-created", {
-          proxyId: port,
-          mock: data.mock,
-          request: data.request,
-        });
-      }
-    } catch (error) {
-      console.warn(
-        `Failed to save auto-created mock for proxy ${port}:`,
-        error
-      );
-    }
-  });
-
-  proxy.on("save-mocks", async () => {
-    try {
-      await dataManager.saveMocks(port, proxy.getMocks());
-    } catch (error) {
-      console.warn(`Failed to save mocks for proxy ${port}:`, error);
-    }
-  });
-
-  proxy.on("error", (errorData) => {
-    if (mainWindow) {
-      mainWindow.webContents.send("proxy-error", {
-        proxyId: port,
-        ...errorData,
-      });
-    }
-    console.error(`Proxy error on port ${port}:`, errorData);
-  });
-
-  console.log(`✅ Event listeners set up for proxy on port ${port}`);
 }
 
 // App event handlers
@@ -4330,10 +5001,61 @@ app.whenReady().then(async () => {
   await dataManager.initialize();
   await proxyManager.initialize();
 
+  // Initialize license manager
+  await initializeLicenseManager();
+
   // Load settings from data manager (not the old system)
   try {
     const loadedSettings = await dataManager.loadSettings();
     appSettings = { ...appSettings, ...loadedSettings };
+
+    // One-time: merge installer overrides if present (created by NSIS)
+    try {
+      const fsSync = require("fs");
+      const path = require("path");
+      const overridesPath = path.join(
+        dataManager.dataDir,
+        "install-overrides.json"
+      );
+      if (fsSync.existsSync(overridesPath)) {
+        const raw = fsSync.readFileSync(overridesPath, "utf8");
+        if (raw && raw.trim()) {
+          const overrides = JSON.parse(raw);
+          // Only accept known boolean keys
+          const allowed = [
+            "runAtStartup",
+            "autoStartProxy",
+            "autoCheckForUpdates",
+          ];
+          const filtered = Object.fromEntries(
+            Object.entries(overrides).filter(
+              ([k, v]) => allowed.includes(k) && typeof v === "boolean"
+            )
+          );
+          if (Object.keys(filtered).length) {
+            appSettings = { ...appSettings, ...filtered };
+            // Apply startup behavior immediately
+            if (
+              Object.prototype.hasOwnProperty.call(filtered, "runAtStartup")
+            ) {
+              configureStartup(filtered.runAtStartup);
+            }
+            // Persist merged settings
+            await dataManager.saveSettings(appSettings);
+          }
+        }
+        // Delete overrides file so we only apply once
+        try {
+          fsSync.unlinkSync(overridesPath);
+        } catch {}
+      }
+    } catch (overrideErr) {
+      // Non-fatal; log for diagnostics only
+      console.warn(
+        "⚠️ Failed to apply install overrides:",
+        overrideErr.message
+      );
+    }
 
     // Initialize proxy manager with auto-start setting
     proxyManager.setAutoStartEnabled(appSettings.autoStartProxy);
@@ -4341,7 +5063,7 @@ app.whenReady().then(async () => {
     // Initialize interceptors with loaded settings
     initializeInterceptors();
 
-    // Configure startup behavior based on settings
+    // Configure startup behavior based on settings (after overrides merge)
     configureStartup(appSettings.runAtStartup);
 
     console.log(
@@ -4389,8 +5111,7 @@ app.whenReady().then(async () => {
 
   console.log("🔧 Setting up proxy configurations...");
   console.log("🔧 DEBUG: About to comment section...");
-  // Create development outgoing proxy for port 4000 -> 3009 (replaces old system)
-  // await createDevelopmentOutgoingProxy(); // Disabled - user will create their own
+  // Development outgoing proxy creation was removed to avoid auto-creating proxies in production.
 
   console.log("🔧 DEBUG: About to loop through proxies...");
 
@@ -4414,10 +5135,72 @@ app.whenReady().then(async () => {
     console.log(`🔧 DEBUG: Finished processing proxy on port ${port}`);
   }
 
-  console.log("🍎 Removing application menu...");
-  // Remove the application menu
-  Menu.setApplicationMenu(null);
-  console.log("🍎 Menu removed successfully");
+  if (!devToolsEnabled) {
+    console.log("🍎 Removing application menu (production)...");
+    // Remove the application menu in production
+    Menu.setApplicationMenu(null);
+    console.log("🍎 Menu removed successfully");
+  } else {
+    console.log("🍎 Keeping application menu (dev mode)");
+  }
+
+  // Set up custom protocol handlers for deep linking
+  console.log("🔗 Setting up custom protocol handlers...");
+
+  // Handle protocol URLs on macOS
+  app.on("open-url", (event, url) => {
+    event.preventDefault();
+    console.log(`🔗 [MACOS] Protocol URL received: ${url}`);
+    handleProtocolUrl(url);
+  });
+
+  // Handle protocol URLs on Windows/Linux (second-instance)
+  app.on("second-instance", (event, commandLine, workingDirectory) => {
+    console.log(
+      "🔗 [WINDOWS] Second instance detected, checking for protocol URL..."
+    );
+    console.log("🔗 [WINDOWS] Command line args:", commandLine);
+
+    // Focus the main window
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+    }
+
+    // Look for protocol URL in command line arguments
+    const protocolUrl = commandLine.find((arg) =>
+      arg.startsWith("sniffler://")
+    );
+    if (protocolUrl) {
+      console.log(`🔗 Protocol URL found in second instance: ${protocolUrl}`);
+      handleProtocolUrl(protocolUrl);
+    }
+  });
+
+  // Prevent multiple instances (required for second-instance to work)
+  const gotTheLock = app.requestSingleInstanceLock();
+  if (!gotTheLock) {
+    console.log("🔒 Another instance is already running, quitting...");
+    app.quit();
+    return;
+  }
+
+  console.log("✅ Custom protocol handlers set up successfully");
+
+  // Check for protocol URLs in initial startup arguments
+  console.log("🔗 [STARTUP] Checking initial command line arguments...");
+  const initialArgs = process.argv;
+  console.log("🔗 [STARTUP] Process argv:", initialArgs);
+  const initialProtocolUrl = initialArgs.find((arg) =>
+    arg.startsWith("sniffler://")
+  );
+  if (initialProtocolUrl) {
+    console.log(
+      `🔗 [STARTUP] Found protocol URL in initial args: ${initialProtocolUrl}`
+    );
+    // Handle it after the app is ready
+    setTimeout(() => handleProtocolUrl(initialProtocolUrl), 1000);
+  }
 
   console.log("🔌 Setting up event listeners...");
   // Set up database sniffer event forwarding
@@ -4512,6 +5295,22 @@ app.whenReady().then(async () => {
     }
   });
 
+  databaseProxyInterceptor.on("database-mock-difference-detected", (data) => {
+    console.log(
+      `📢 Main process received database-mock-difference-detected event for proxy ${data.proxyPort}`
+    );
+    if (mainWindow) {
+      console.log(
+        `📤 Sending database-mock-difference-detected to renderer for proxy ${data.proxyPort}`
+      );
+      mainWindow.webContents.send("database-mock-difference-detected", data);
+    } else {
+      console.log(
+        `❌ Cannot send database-mock-difference-detected - mainWindow is null`
+      );
+    }
+  });
+
   databaseProxyInterceptor.on("database-mock-updated", (data) => {
     if (mainWindow) {
       mainWindow.webContents.send("database-mock-updated", data);
@@ -4556,111 +5355,92 @@ app.whenReady().then(async () => {
 
   console.log("🖥️ All initialization complete, creating window...");
 
-  // ===== PROXY SETUP VALIDATION =====
-  console.log("\n" + "=".repeat(60));
-  console.log("🔍 SNIFFLER PROXY SETUP VALIDATION");
-  console.log("=".repeat(60));
+  // ===== PROXY SETUP VALIDATION (dev only) =====
+  if (devToolsEnabled) {
+    console.log("\n" + "=".repeat(60));
+    console.log("🔍 SNIFFLER PROXY SETUP VALIDATION");
+    console.log("=".repeat(60));
 
-  // Validate HTTP Proxies
-  const httpProxies = Array.from(proxies.values());
-  if (httpProxies.length > 0) {
-    console.log("✅ HTTP PROXIES CONFIGURED:");
-    httpProxies.forEach(({ proxy }) => {
-      const status = proxy.isRunning ? "✅ RUNNING" : "❌ STOPPED";
-      console.log(
-        `   📡 ${proxy.name} (port ${proxy.port} → ${proxy.targetHost}:${proxy.targetPort}) ${status}`
-      );
-      if (proxy.port === 4000 && proxy.targetPort === 3009) {
-        console.log("   ✅ Main HTTP proxy correctly configured (4000 → 3009)");
-      }
-    });
-  } else {
-    console.log("⚠️  NO HTTP PROXIES CONFIGURED");
-  }
-
-  // Validate Outgoing Proxies
-  const outgoingProxies = outgoingInterceptor.getProxies();
-  if (outgoingProxies.length > 0) {
-    console.log("✅ OUTGOING PROXIES CONFIGURED:");
-    outgoingProxies.forEach((proxy) => {
-      const status = proxy.isRunning ? "✅ RUNNING" : "❌ STOPPED";
-      console.log(
-        `   🌐 ${proxy.name} (port ${proxy.port} → ${proxy.targetUrl}) ${status}`
-      );
-      if (proxy.port === 4444) {
-        console.log(
-          "   ✅ Main outgoing proxy correctly configured (4444 → external)"
-        );
-      }
-    });
-  } else {
-    console.log("⚠️  NO OUTGOING PROXIES CONFIGURED");
-  }
-
-  // Validate Database Proxies
-  console.log(
-    "🔍 DEBUG: About to call databaseProxyInterceptor.getDatabaseProxies()..."
-  );
-  let databaseProxies = [];
-  try {
-    databaseProxies = databaseProxyInterceptor.getDatabaseProxies();
-    console.log(
-      "🔍 DEBUG: Successfully got database proxies, count:",
-      databaseProxies.length
-    );
-    if (databaseProxies.length > 0) {
-      console.log("✅ DATABASE PROXIES CONFIGURED:");
-      databaseProxies.forEach((proxy) => {
+    // Validate HTTP Proxies
+    const httpProxies = Array.from(proxies.values());
+    if (httpProxies.length > 0) {
+      console.log("✅ HTTP PROXIES CONFIGURED:");
+      httpProxies.forEach(({ proxy }) => {
         const status = proxy.isRunning ? "✅ RUNNING" : "❌ STOPPED";
         console.log(
-          `   💾 ${proxy.name} (port ${proxy.port}, protocol: ${proxy.protocol}) ${status}`
+          `   📡 ${proxy.name} (port ${proxy.port} → ${proxy.targetHost}:${proxy.targetPort}) ${status}`
         );
-        if (proxy.port === 4445) {
-          console.log("   ✅ Main database proxy correctly configured (4445)");
-        }
       });
     } else {
-      console.log("⚠️  NO DATABASE PROXIES CONFIGURED");
+      console.log("⚠️  NO HTTP PROXIES CONFIGURED");
     }
-  } catch (error) {
-    console.error(
-      "❌ ERROR calling databaseProxyInterceptor.getDatabaseProxies():",
-      error
-    );
-    console.error("❌ Stack trace:", error.stack);
+
+    // Validate Outgoing Proxies
+    const outgoingProxies = outgoingInterceptor.getProxies();
+    if (outgoingProxies.length > 0) {
+      console.log("✅ OUTGOING PROXIES CONFIGURED:");
+      outgoingProxies.forEach((proxy) => {
+        const status = proxy.isRunning ? "✅ RUNNING" : "❌ STOPPED";
+        console.log(
+          `   🌐 ${proxy.name} (port ${proxy.port} → ${proxy.targetUrl}) ${status}`
+        );
+      });
+    } else {
+      console.log("⚠️  NO OUTGOING PROXIES CONFIGURED");
+    }
+
+    // Validate Database Proxies
+    let databaseProxies = [];
+    try {
+      databaseProxies = databaseProxyInterceptor.getDatabaseProxies();
+      if (databaseProxies.length > 0) {
+        console.log("✅ DATABASE PROXIES CONFIGURED:");
+        databaseProxies.forEach((proxy) => {
+          const status = proxy.isRunning ? "✅ RUNNING" : "❌ STOPPED";
+          console.log(
+            `   💾 ${proxy.name} (port ${proxy.port}, protocol: ${proxy.protocol}) ${status}`
+          );
+        });
+      } else {
+        console.log("⚠️  NO DATABASE PROXIES CONFIGURED");
+      }
+    } catch (error) {
+      console.error(
+        "❌ ERROR calling databaseProxyInterceptor.getDatabaseProxies():",
+        error
+      );
+    }
+
+    // Event Flow Validation
+    console.log("✅ EVENT FLOW VALIDATION:");
+    console.log("   📡 HTTP proxy events → mainWindow.webContents.send");
+    console.log("   🌐 Outgoing proxy events → mainWindow.webContents.send");
+    console.log("   💾 Database proxy events → mainWindow.webContents.send");
+    console.log("   🖥️  UI event listeners configured in App.jsx");
+
+    // Summary
+    const totalProxies =
+      httpProxies.length + outgoingProxies.length + databaseProxies.length;
+    const runningProxies = [
+      ...httpProxies.filter((p) => p.proxy.isRunning),
+      ...outgoingProxies.filter((p) => p.isRunning),
+      ...databaseProxies.filter((p) => p.isRunning),
+    ].length;
+
+    console.log("\n📊 SETUP SUMMARY:");
+    console.log(`   Total Proxies: ${totalProxies}`);
+    console.log(`   Running Proxies: ${runningProxies}`);
+    console.log(`   UI Available: http://localhost:8765`);
+    console.log(`   Run Test: node test-proxy-setup.js`);
+
+    if (runningProxies === totalProxies && totalProxies >= 3) {
+      console.log("🎉 ALL SYSTEMS GO! Sniffler is ready for testing.");
+    } else {
+      console.log("⚠️  Some proxies may not be running. Check the logs above.");
+    }
+    console.log("=".repeat(60) + "\n");
+    // ===== END VALIDATION =====
   }
-
-  // Event Flow Validation
-  console.log("✅ EVENT FLOW VALIDATION:");
-  console.log("   📡 HTTP proxy events → mainWindow.webContents.send");
-  console.log("   🌐 Outgoing proxy events → mainWindow.webContents.send");
-  console.log("   💾 Database proxy events → mainWindow.webContents.send");
-  console.log("   🖥️  UI event listeners configured in App.jsx");
-
-  console.log("🔍 DEBUG: About to calculate summary...");
-
-  // Summary
-  const totalProxies =
-    httpProxies.length + outgoingProxies.length + databaseProxies.length;
-  const runningProxies = [
-    ...httpProxies.filter((p) => p.proxy.isRunning),
-    ...outgoingProxies.filter((p) => p.isRunning),
-    ...databaseProxies.filter((p) => p.isRunning),
-  ].length;
-
-  console.log("\n📊 SETUP SUMMARY:");
-  console.log(`   Total Proxies: ${totalProxies}`);
-  console.log(`   Running Proxies: ${runningProxies}`);
-  console.log(`   UI Available: http://localhost:8765`);
-  console.log(`   Run Test: node test-proxy-setup.js`);
-
-  if (runningProxies === totalProxies && totalProxies >= 3) {
-    console.log("🎉 ALL SYSTEMS GO! Sniffler is ready for testing.");
-  } else {
-    console.log("⚠️  Some proxies may not be running. Check the logs above.");
-  }
-  console.log("=".repeat(60) + "\n");
-  // ===== END VALIDATION =====
 
   console.log("🔥 DEBUG: About to call createWindow function...");
   try {
@@ -4724,10 +5504,32 @@ app.on("activate", () => {
 
 // Handle app closing
 app.on("before-quit", async (event) => {
-  // Prevent default quit to handle cleanup first
+  console.log("🔄 before-quit event triggered");
+  console.log("🔄 autoUpdater exists:", !!autoUpdater);
+  console.log(
+    "🔄 isUpdateInProgress:",
+    autoUpdater ? autoUpdater.isUpdateInProgress : "N/A"
+  );
+
+  // Check if this is an update-related quit FIRST - if so, allow it to proceed immediately
+  if (autoUpdater && autoUpdater.isUpdateInProgress) {
+    console.log(
+      "🔄 Update in progress - allowing immediate quit for installer"
+    );
+    console.log("🔄 Skipping cleanup to allow update process to complete");
+    // Don't preventDefault() - let the quit proceed immediately for update
+    return;
+  }
+
+  // For normal app closure, prevent default quit to handle cleanup first
+  console.log(
+    "🔄 Normal quit detected - preventing default and performing cleanup"
+  );
   event.preventDefault();
 
   try {
+    console.log("App shutting down - performing cleanup...");
+
     // Save settings and proxy configurations before closing
     await saveSettings();
     await saveProxyConfigurations();
@@ -4765,10 +5567,11 @@ app.on("before-quit", async (event) => {
     // Cleanup old data periodically
     await dataManager.cleanup();
 
+    console.log("Cleanup complete - quitting app");
     // Now actually quit
     app.exit(0);
   } catch (error) {
-    // console.error("Error during app shutdown:", error);
+    console.error("Error during app shutdown:", error);
     // Force quit if cleanup fails
     app.exit(1);
   }

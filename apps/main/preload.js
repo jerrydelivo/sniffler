@@ -1,5 +1,29 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
+// Lightweight event buffer to avoid losing early events before renderer subscribes
+const __eventBuffers = {
+  "mock-auto-created": [],
+};
+const __subscribers = {
+  "mock-auto-created": [],
+};
+
+// Attach a single low-level listener to buffer events and fan-out to subscribers
+ipcRenderer.on("mock-auto-created", (_event, data) => {
+  const subs = __subscribers["mock-auto-created"];
+  if (subs.length === 0) {
+    // No subscribers yet: buffer the event for later delivery
+    __eventBuffers["mock-auto-created"].push(data);
+  } else {
+    // Subscribers present: deliver immediately, do not buffer to avoid duplicates
+    for (const cb of subs) {
+      try {
+        cb(data);
+      } catch (_) {}
+    }
+  }
+});
+
 // Expose protected methods that allow the renderer process to use
 // the ipcRenderer without exposing the entire object
 contextBridge.exposeInMainWorld("electronAPI", {
@@ -12,6 +36,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   getProxies: () => ipcRenderer.invoke("get-proxies"),
   updateProxyName: (port, newName) =>
     ipcRenderer.invoke("update-proxy-name", port, newName),
+  updateProxyConfig: (port, updates) =>
+    ipcRenderer.invoke("update-proxy-config", port, updates),
   deleteProxy: (port) => ipcRenderer.invoke("delete-proxy", port),
   testTargetConnection: (data) =>
     ipcRenderer.invoke("test-target-connection", data),
@@ -42,10 +68,36 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.on("proxy-error", (_event, data) => callback(data));
   },
   onMockAutoCreated: (callback) => {
-    ipcRenderer.on("mock-auto-created", (_event, data) => callback(data));
+    const subs = __subscribers["mock-auto-created"];
+    const wasEmpty = subs.length === 0;
+    // Register subscriber
+    subs.push(callback);
+    // If this is the first subscriber, flush buffered events exactly once
+    if (wasEmpty) {
+      const buffer = __eventBuffers["mock-auto-created"];
+      if (buffer && buffer.length) {
+        try {
+          for (const item of buffer) {
+            callback(item);
+          }
+        } finally {
+          __eventBuffers["mock-auto-created"] = [];
+        }
+      }
+    }
   },
   onMockDifferenceDetected: (callback) => {
     ipcRenderer.on("mock-difference-detected", (_event, data) =>
+      callback(data)
+    );
+  },
+  onOutgoingMockDifferenceDetected: (callback) => {
+    ipcRenderer.on("outgoing-mock-difference-detected", (_event, data) =>
+      callback(data)
+    );
+  },
+  onDatabaseMockDifferenceDetected: (callback) => {
+    ipcRenderer.on("database-mock-difference-detected", (_event, data) =>
       callback(data)
     );
   },
@@ -77,7 +129,43 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // App management
   getAppVersion: () => ipcRenderer.invoke("get-app-version"),
   getLicenseInfo: () => ipcRenderer.invoke("get-license-info"),
-  purchaseLicense: (data) => ipcRenderer.invoke("purchase-license", data),
+
+  // License management
+  checkLicenseStatus: () => ipcRenderer.invoke("check-license-status"),
+  setLicenseKey: (licenseKey) =>
+    ipcRenderer.invoke("set-license-key", licenseKey),
+  removeLicenseKey: () => ipcRenderer.invoke("remove-license-key"),
+  clearLicense: () => ipcRenderer.invoke("clear-license"),
+  setLicenseEmail: (email) => ipcRenderer.invoke("set-license-email", email),
+  removeLicenseEmail: () => ipcRenderer.invoke("remove-license-email"),
+  startFreeTrial: () => ipcRenderer.invoke("start-free-trial"),
+  createCheckoutSession: (data) =>
+    ipcRenderer.invoke("create-checkout-session", data),
+  openCheckoutUrl: (url) => ipcRenderer.invoke("open-checkout-url", url),
+  isPremiumFeature: (feature) =>
+    ipcRenderer.invoke("is-premium-feature", feature),
+
+  // Licensing API base (for admin UI calls)
+  getLicensingApiBase: () => ipcRenderer.invoke("get-licensing-api-base"),
+
+  // Payment processing
+  processPaymentSuccess: (data) =>
+    ipcRenderer.invoke("process-payment-success", data),
+  processPaymentCancelled: () =>
+    ipcRenderer.invoke("process-payment-cancelled"),
+
+  // License and payment event listeners
+  onLicenseStatusChanged: (callback) => {
+    ipcRenderer.on("license-status-changed", (_event, data) => callback(data));
+  },
+  onStripePaymentSuccess: (callback) => {
+    ipcRenderer.on("stripe-payment-success", (_event, data) => callback(data));
+  },
+  onStripePaymentCancelled: (callback) => {
+    ipcRenderer.on("stripe-payment-cancelled", (_event, data) =>
+      callback(data)
+    );
+  },
 
   // File operations
   exportMocks: (data) => ipcRenderer.invoke("export-mocks", data),
@@ -105,7 +193,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   saveSettings: (settings) => ipcRenderer.invoke("save-settings", settings),
 
   // Auto-updater
-  checkForUpdates: (silent = false) => ipcRenderer.invoke("check-for-updates", silent),
+  checkForUpdates: (silent = false) =>
+    ipcRenderer.invoke("check-for-updates", silent),
   downloadUpdate: () => ipcRenderer.invoke("download-update"),
   installUpdate: () => ipcRenderer.invoke("install-update"),
   getUpdateStatus: () => ipcRenderer.invoke("get-update-status"),
@@ -242,6 +331,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   toggleDevTools: () => ipcRenderer.invoke("toggle-dev-tools"),
   openDevTools: () => ipcRenderer.invoke("open-dev-tools"),
   closeDevTools: () => ipcRenderer.invoke("close-dev-tools"),
+  isDevToolsEnabled: () => ipcRenderer.invoke("is-dev-tools-enabled"),
 
   // Database Proxy Management
   getDatabaseProxies: () => ipcRenderer.invoke("get-database-proxies"),
@@ -385,6 +475,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
   },
   onOutgoingMockAutoCreated: (callback) => {
     ipcRenderer.on("outgoing-mock-auto-created", (_event, data) =>
+      callback(data)
+    );
+  },
+  onOutgoingMockDifferenceDetected: (callback) => {
+    ipcRenderer.on("outgoing-mock-difference-detected", (_event, data) =>
       callback(data)
     );
   },

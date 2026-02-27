@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { MdVisibility, MdCompare, MdSave } from "react-icons/md";
 import RequestDetailModal from "../modals/RequestDetailModal";
 import CreateRequestModal from "../modals/CreateRequestModal";
@@ -17,6 +17,8 @@ function RequestsView({
   onRefreshMocks,
   mocks = [],
   hideHeader = false,
+  recentMockDifferences = [],
+  onClearRecentMockDifferences,
 }) {
   const [filter, setFilter] = useState("all");
   const [search, setSearch] = useState("");
@@ -30,6 +32,7 @@ function RequestsView({
     message: "",
     type: "success",
   });
+  // Recent differences are now passed as props from the parent component
 
   // Load settings to get auto-replace setting
   useEffect(() => {
@@ -54,39 +57,61 @@ function RequestsView({
     loadSettings();
   }, []);
 
-  // Listen for mock difference events
+  // Recent mock differences are now managed by the App component and passed as props
+
+  // Listen for mock auto-replaced events
   useEffect(() => {
     if (window.electronAPI) {
-      const handleMockDifference = (data) => {
-        showToast(
-          `⚠️ Response differs from mock for ${data.request.method} ${data.request.url}`,
-          "warning"
-        );
-      };
-
       const handleMockAutoReplaced = (data) => {
-        showToast(
-          `🔄 Mock automatically updated for ${data.request.method} ${data.request.url}`,
-          "success"
+        console.log(
+          "🔄 RequestsView: Mock auto-replaced event received:",
+          data
         );
+
+        // Ensure we have the required data
+        if (data && data.request && data.request.method && data.request.url) {
+          showToast(
+            `🔄 Mock automatically updated for ${data.request.method} ${data.request.url}`,
+            "success"
+          );
+        } else {
+          showToast(
+            `🔄 Mock automatically updated (incomplete data)`,
+            "success"
+          );
+        }
+
         // Refresh mocks to show the updated data
         if (onRefreshMocks) {
           onRefreshMocks();
         }
       };
 
-      window.electronAPI.onMockDifferenceDetected(handleMockDifference);
+      console.log(
+        "🔧 RequestsView: Setting up mock auto-replaced event listener"
+      );
+      // Note: mock-difference-detected is handled by App.jsx to avoid duplicate toast notifications
       window.electronAPI.onMockAutoReplaced(handleMockAutoReplaced);
+      console.log("🔧 RequestsView: Event listeners set up successfully");
 
       return () => {
         // Clean up event listeners
+        console.log(
+          "🧹 RequestsView: Cleaning up mock difference event listeners"
+        );
         try {
-          window.electronAPI.removeAllListeners?.("mock-difference-detected");
           window.electronAPI.removeAllListeners?.("mock-auto-replaced");
         } catch (error) {
-          // Error removing event listeners - continue
+          console.warn(
+            "⚠️ RequestsView: Error removing event listeners:",
+            error
+          );
         }
       };
+    } else {
+      console.warn(
+        "⚠️ RequestsView: window.electronAPI not available for mock difference events"
+      );
     }
   }, [onRefreshMocks]);
 
@@ -104,7 +129,8 @@ function RequestsView({
     // Find matching mock and compare
     const matchingMock = findMatchingMock(request, mocks);
     if (matchingMock) {
-      return compareRequestWithMock(request, matchingMock);
+      const comparison = compareRequestWithMock(request, matchingMock);
+      return comparison;
     }
 
     return null;
@@ -122,30 +148,42 @@ function RequestsView({
   };
 
   const showToast = (message, type = "success") => {
+    console.log("📢 RequestsView: showToast called:", { message, type });
     setToast({ show: true, message, type });
+
+    // Also log to console for debugging
+    if (type === "warning") {
+      console.warn("⚠️ RequestsView NOTIFICATION:", message);
+    } else if (type === "error") {
+      console.error("❌ RequestsView NOTIFICATION:", message);
+    } else {
+      console.info("ℹ️ RequestsView NOTIFICATION:", message);
+    }
   };
 
   const hideToast = () => {
     setToast({ show: false, message: "", type: "success" });
   };
 
-  const filteredRequests = requests.filter((request) => {
-    const matchesFilter =
-      filter === "all" ||
-      (filter === "success" && request.status === "success") ||
-      (filter === "failed" && request.status === "failed") ||
-      (filter === "pending" &&
-        (!request.status || request.status === "pending")) ||
-      (filter === "mock-differences" &&
-        hasMatchingMockWithDifferences(request));
+  const filteredRequests = useMemo(() => {
+    return requests.filter((request) => {
+      const matchesFilter =
+        filter === "all" ||
+        (filter === "success" && request.status === "success") ||
+        (filter === "failed" && request.status === "failed") ||
+        (filter === "pending" &&
+          (!request.status || request.status === "pending")) ||
+        (filter === "mock-differences" &&
+          hasMatchingMockWithDifferences(request));
 
-    const matchesSearch =
-      search === "" ||
-      request.url.toLowerCase().includes(search.toLowerCase()) ||
-      request.method.toLowerCase().includes(search.toLowerCase());
+      const matchesSearch =
+        search === "" ||
+        request.url.toLowerCase().includes(search.toLowerCase()) ||
+        request.method.toLowerCase().includes(search.toLowerCase());
 
-    return matchesFilter && matchesSearch;
-  });
+      return matchesFilter && matchesSearch;
+    });
+  }, [requests, mocks, filter, search]);
 
   const handleReplaceMock = async (request) => {
     if (!request.response) {
@@ -648,12 +686,119 @@ function RequestsView({
     );
   };
 
+  // Calculate mock differences count for notification banner (memoized to prevent infinite re-renders)
+  const mockDifferences = useMemo(() => {
+    return requests.filter((r) => hasMatchingMockWithDifferences(r));
+  }, [requests, mocks]);
+
+  const mockDifferencesCount = mockDifferences.length;
+
   return (
     <div>
       {!hideHeader && (
         <h1 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-white mb-4 sm:mb-6">
           Requests
         </h1>
+      )}
+
+      {/* Recent Mock Differences Alert */}
+      {recentMockDifferences.length > 0 && (
+        <div className="bg-orange-50 dark:bg-orange-900 border border-orange-200 dark:border-orange-700 rounded-lg p-4 mb-4 sm:mb-6">
+          <div className="flex items-start">
+            <div className="flex-shrink-0">
+              <svg
+                className="h-5 w-5 text-orange-400"
+                viewBox="0 0 20 20"
+                fill="currentColor"
+              >
+                <path
+                  fillRule="evenodd"
+                  d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z"
+                  clipRule="evenodd"
+                />
+              </svg>
+            </div>
+            <div className="ml-3 flex-1">
+              <h3 className="text-sm font-medium text-orange-800 dark:text-orange-200">
+                🚨 Recent Mock Differences Detected
+              </h3>
+              <div className="mt-2 space-y-1">
+                {recentMockDifferences.map((diff) => (
+                  <div
+                    key={diff.id}
+                    className="text-sm text-orange-700 dark:text-orange-300 bg-orange-100 dark:bg-orange-800 rounded px-2 py-1"
+                  >
+                    <span className="font-medium">
+                      {diff.method} {diff.url}
+                    </span>
+                    <span className="ml-2 text-xs">
+                      ({new Date(diff.timestamp).toLocaleTimeString()})
+                    </span>
+                    <div className="text-xs mt-1">{diff.summary}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="ml-4 flex-shrink-0 flex gap-2">
+              <button
+                onClick={() => setFilter("mock-differences")}
+                className="bg-orange-100 dark:bg-orange-800 px-3 py-1 rounded text-sm text-orange-800 dark:text-orange-200 hover:bg-orange-200 dark:hover:bg-orange-700 transition-colors"
+              >
+                View All
+              </button>
+              <button
+                onClick={() => {
+                  if (onClearRecentMockDifferences) {
+                    onClearRecentMockDifferences();
+                  }
+                }}
+                className="bg-orange-100 dark:bg-orange-800 px-3 py-1 rounded text-sm text-orange-800 dark:text-orange-200 hover:bg-orange-200 dark:hover:bg-orange-700 transition-colors"
+              >
+                Clear
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Mock Differences Notification Banner */}
+      {mockDifferencesCount > 0 && recentMockDifferences.length === 0 && (
+        <div className="bg-orange-50 dark:bg-orange-900 border border-orange-200 dark:border-orange-700 rounded-lg p-4 mb-4 sm:mb-6">
+          <div className="flex items-center">
+            <div className="flex-shrink-0">
+              <svg
+                className="h-5 w-5 text-orange-400"
+                viewBox="0 0 20 20"
+                fill="currentColor"
+              >
+                <path
+                  fillRule="evenodd"
+                  d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z"
+                  clipRule="evenodd"
+                />
+              </svg>
+            </div>
+            <div className="ml-3">
+              <h3 className="text-sm font-medium text-orange-800 dark:text-orange-200">
+                {mockDifferencesCount} request
+                {mockDifferencesCount !== 1 ? "s" : ""} with mock differences
+                detected
+              </h3>
+              <p className="mt-1 text-sm text-orange-700 dark:text-orange-300">
+                Response data differs from existing mocks. Review these requests
+                to update your mocks or investigate API changes.
+              </p>
+            </div>
+            <div className="ml-auto">
+              <button
+                onClick={() => setFilter("mock-differences")}
+                className="bg-orange-100 dark:bg-orange-800 px-3 py-1 rounded text-sm text-orange-800 dark:text-orange-200 hover:bg-orange-200 dark:hover:bg-orange-700 transition-colors"
+              >
+                View Differences
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Filters */}
@@ -668,11 +813,30 @@ function RequestsView({
               onChange={(e) => setFilter(e.target.value)}
               className="px-2 sm:px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
             >
-              <option value="all">All Requests</option>
-              <option value="success">Successful</option>
-              <option value="failed">Failed</option>
-              <option value="pending">Pending</option>
-              <option value="mock-differences">Mock Differences</option>
+              <option value="all">All Requests ({requests.length})</option>
+              <option value="success">
+                Successful (
+                {requests.filter((r) => r.status === "success").length})
+              </option>
+              <option value="failed">
+                Failed ({requests.filter((r) => r.status === "failed").length})
+              </option>
+              <option value="pending">
+                Pending (
+                {
+                  requests.filter((r) => !r.status || r.status === "pending")
+                    .length
+                }
+                )
+              </option>
+              <option value="mock-differences">
+                ⚠️ Mock Differences (
+                {
+                  requests.filter((r) => hasMatchingMockWithDifferences(r))
+                    .length
+                }
+                )
+              </option>
             </select>
           </div>
           <div className="flex-1">

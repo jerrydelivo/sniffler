@@ -32,10 +32,16 @@ import {
   isValidDatabaseUrl,
   generateProxyConnectionString,
 } from "../../utils/databaseUrlParser";
+import {
+  PremiumFeatureBlock,
+  usePremiumFeature,
+} from "../../hooks/usePremiumFeature.jsx";
 
 const DatabaseProxyView = ({
   databaseMocks: propDatabaseMocks,
   onRefreshDatabaseMocks,
+  proxyNotifications = new Map(),
+  onClearNotifications = () => {},
 }) => {
   const [activeTab, setActiveTab] = useState("overview");
   const [proxies, setProxies] = useState([]);
@@ -84,6 +90,9 @@ const DatabaseProxyView = ({
   // Import/Export state
   const [isExporting, setIsExporting] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
+
+  // Check premium access for mocks feature
+  const { canUseFeature: canUseMocks } = usePremiumFeature("mock-management");
 
   const loadData = async () => {
     try {
@@ -665,308 +674,363 @@ const DatabaseProxyView = ({
     );
   }
 
-  return (
-    <main className="space-y-4 sm:space-y-6">
-      {/* Testing Mode Banner */}
-      {testingMode && (
-        <div className="bg-orange-100 dark:bg-orange-900 border border-orange-200 dark:border-orange-800 rounded-lg p-4">
-          <div className="flex items-center gap-2">
-            <MdWarning className="w-5 h-5 text-orange-600 dark:text-orange-400" />
-            <span className="font-medium text-orange-800 dark:text-orange-200">
-              Testing Mode Active
-            </span>
-          </div>
-          <p className="text-sm text-orange-700 dark:text-orange-300 mt-1">
-            Database queries are hitting real backends and being compared with
-            saved mocks for validation.
-          </p>
-        </div>
-      )}
+  const handleNavigateToLicense = () => {
+    // This would be passed from parent component
+    if (window.electronAPI) {
+      // For now, just show an alert - in real implementation, parent would handle navigation
+      alert(
+        "Please upgrade to premium to access Database Proxies. Click the upgrade button in the sidebar."
+      );
+    }
+  };
 
-      {/* Header */}
-      <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-4 sm:p-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-white">
-              Database Proxies
-            </h1>
-            <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
-              Intercept and manage database connections with protocol-specific
-              parsing
+  return (
+    <PremiumFeatureBlock
+      feature="database-proxies"
+      onUpgrade={handleNavigateToLicense}
+    >
+      <main className="space-y-4 sm:space-y-6">
+        {/* Testing Mode Banner */}
+        {testingMode && (
+          <div className="bg-orange-100 dark:bg-orange-900 border border-orange-200 dark:border-orange-800 rounded-lg p-4">
+            <div className="flex items-center gap-2">
+              <MdWarning className="w-5 h-5 text-orange-600 dark:text-orange-400" />
+              <span className="font-medium text-orange-800 dark:text-orange-200">
+                Testing Mode Active
+              </span>
+            </div>
+            <p className="text-sm text-orange-700 dark:text-orange-300 mt-1">
+              Database queries are hitting real backends and being compared with
+              saved mocks for validation.
             </p>
           </div>
-          <div className="flex items-center gap-2">
-            {/* Warning badge when no proxies are active */}
-            {stats.totalProxies > 0 && stats.runningProxies === 0 && (
-              <div className="flex items-center gap-2 px-3 py-2 bg-orange-100 dark:bg-orange-900 text-orange-700 dark:text-orange-200 rounded-lg">
-                <MdWarning className="w-4 h-4" />
-                <span className="text-sm font-medium">No active proxies</span>
-              </div>
-            )}
+        )}
 
-            {/* Import/Export buttons */}
-            <div className="flex items-center gap-1">
+        {/* Header */}
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-4 sm:p-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-white">
+                Database Proxies
+              </h1>
+              <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
+                Intercept and manage database connections with protocol-specific
+                parsing
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              {/* Warning badge when no proxies are active */}
+              {stats.totalProxies > 0 && stats.runningProxies === 0 && (
+                <div className="flex items-center gap-2 px-3 py-2 bg-orange-100 dark:bg-orange-900 text-orange-700 dark:text-orange-200 rounded-lg">
+                  <MdWarning className="w-4 h-4" />
+                  <span className="text-sm font-medium">No active proxies</span>
+                </div>
+              )}
+
+              {/* Import/Export buttons */}
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={handleImportDatabaseConfig}
+                  disabled={isImporting}
+                  className="flex items-center gap-1 px-2 py-2 text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-900 rounded-lg transition-colors"
+                  title="Import Configuration & Mocks"
+                >
+                  <MdFileUpload className="w-4 h-4" />
+                  <span className="hidden sm:inline text-sm">Import</span>
+                </button>
+                <button
+                  onClick={handleExportDatabaseConfig}
+                  disabled={isExporting}
+                  className="flex items-center gap-1 px-2 py-2 text-green-600 hover:text-green-800 dark:text-green-400 dark:hover:text-green-300 hover:bg-green-50 dark:hover:bg-green-900 rounded-lg transition-colors"
+                  title="Export Configuration & Mocks"
+                >
+                  <MdFileDownload className="w-4 h-4" />
+                  <span className="hidden sm:inline text-sm">Export</span>
+                </button>
+              </div>
+
               <button
-                onClick={handleImportDatabaseConfig}
-                disabled={isImporting}
-                className="flex items-center gap-1 px-2 py-2 text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-900 rounded-lg transition-colors"
-                title="Import Configuration & Mocks"
+                onClick={loadData}
+                className="flex items-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
               >
-                <MdFileUpload className="w-4 h-4" />
-                <span className="hidden sm:inline text-sm">Import</span>
-              </button>
-              <button
-                onClick={handleExportDatabaseConfig}
-                disabled={isExporting}
-                className="flex items-center gap-1 px-2 py-2 text-green-600 hover:text-green-800 dark:text-green-400 dark:hover:text-green-300 hover:bg-green-50 dark:hover:bg-green-900 rounded-lg transition-colors"
-                title="Export Configuration & Mocks"
-              >
-                <MdFileDownload className="w-4 h-4" />
-                <span className="hidden sm:inline text-sm">Export</span>
+                <MdRefresh />
+                Refresh
               </button>
             </div>
-
-            <button
-              onClick={loadData}
-              className="flex items-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-            >
-              <MdRefresh />
-              Refresh
-            </button>
           </div>
         </div>
-      </div>
 
-      {/* Status Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-        <StatCard
-          title="Total Queries"
-          value={stats.totalQueries || 0}
-          icon={<MdList />}
-          color="blue"
-        />
-        <StatCard
-          title="Successful"
-          value={stats.successfulQueries || 0}
-          icon={<MdCheckCircle />}
-          color="green"
-        />
-        <StatCard
-          title="Failed"
-          value={stats.failedQueries || 0}
-          icon={<MdError />}
-          color="red"
-        />
-        <StatCard
-          title="Active Proxies"
-          value={`${stats.runningProxies || 0}/${stats.totalProxies || 0}`}
-          icon={<MdWifi />}
-          color={stats.runningProxies > 0 ? "green" : "gray"}
-        />
-      </div>
+        {/* Status Cards */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+          <StatCard
+            title="Total Queries"
+            value={stats.totalQueries || 0}
+            icon={<MdList />}
+            color="blue"
+          />
+          <StatCard
+            title="Successful"
+            value={stats.successfulQueries || 0}
+            icon={<MdCheckCircle />}
+            color="green"
+          />
+          <StatCard
+            title="Failed"
+            value={stats.failedQueries || 0}
+            icon={<MdError />}
+            color="red"
+          />
+          <StatCard
+            title="Active Proxies"
+            value={`${stats.runningProxies || 0}/${stats.totalProxies || 0}`}
+            icon={<MdWifi />}
+            color={stats.runningProxies > 0 ? "green" : "gray"}
+          />
+        </div>
 
-      {/* Tabs */}
-      <div className="bg-white dark:bg-gray-800 rounded-lg shadow">
-        <div className="border-b border-gray-200 dark:border-gray-700">
-          <nav
-            className="flex overflow-x-auto"
-            role="tablist"
-            aria-label="Database Proxy Tabs"
-          >
-            {[
-              { id: "overview", label: "Overview", icon: <MdBarChart /> },
-              {
-                id: "proxies",
-                label: "Proxies",
-                icon: <MdStorage />,
-                count: proxies.length,
-              },
-              {
-                id: "requests",
-                label: "Requests",
-                icon: <MdList />,
-                count: queries.length,
-              },
-              {
-                id: "mocks",
-                label: "Mocks",
-                icon: <MdCheckCircle />,
-                count: databaseMocks.length,
-              },
-            ].map((tab) => (
-              <button
-                key={tab.id}
-                data-testid={`tab-${tab.id}`}
-                role="tab"
-                aria-selected={activeTab === tab.id}
-                aria-controls={`tabpanel-${tab.id}`}
-                onClick={() => setActiveTab(tab.id)}
-                className={`py-3 sm:py-4 px-3 sm:px-6 text-xs sm:text-sm font-medium border-b-2 flex items-center gap-1 sm:gap-2 flex-shrink-0 ${
-                  activeTab === tab.id
-                    ? "border-blue-500 text-blue-600 dark:text-blue-400"
-                    : "border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600"
-                }`}
+        {/* Tabs */}
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow">
+          <div className="border-b border-gray-200 dark:border-gray-700">
+            <nav
+              className="flex overflow-x-auto"
+              role="tablist"
+              aria-label="Database Proxy Tabs"
+            >
+              {[
+                { id: "overview", label: "Overview", icon: <MdBarChart /> },
+                {
+                  id: "proxies",
+                  label: "Proxies",
+                  icon: <MdStorage />,
+                  count: proxies.length,
+                },
+                {
+                  id: "requests",
+                  label: "Requests",
+                  icon: <MdList />,
+                  count: queries.length,
+                },
+                {
+                  id: "mocks",
+                  label: "Mocks",
+                  icon: <MdCheckCircle />,
+                  count: databaseMocks.length,
+                  isPremium: !canUseMocks,
+                },
+              ].map((tab) => (
+                <button
+                  key={tab.id}
+                  data-testid={`tab-${tab.id}`}
+                  role="tab"
+                  aria-selected={activeTab === tab.id}
+                  aria-controls={`tabpanel-${tab.id}`}
+                  onClick={() => {
+                    if (tab.isPremium) {
+                      // Don't change tab, just show the premium message in content
+                      return;
+                    }
+                    setActiveTab(tab.id);
+                  }}
+                  className={`py-3 sm:py-4 px-3 sm:px-6 text-xs sm:text-sm font-medium border-b-2 flex items-center gap-1 sm:gap-2 flex-shrink-0 ${
+                    activeTab === tab.id
+                      ? "border-blue-500 text-blue-600 dark:text-blue-400"
+                      : tab.isPremium
+                      ? "border-transparent text-gray-400 dark:text-gray-500 cursor-not-allowed"
+                      : "border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600"
+                  }`}
+                >
+                  <span className="text-sm sm:text-base">{tab.icon}</span>
+                  <span className="hidden sm:inline">{tab.label}</span>
+                  <span className="sm:hidden">{tab.label.slice(0, 3)}</span>
+                  {tab.isPremium && <span className="text-xs">🔒</span>}
+                  {tab.count !== undefined && (
+                    <span
+                      data-testid={`${tab.id}-count`}
+                      className={`ml-1 py-0.5 px-1.5 sm:px-2 rounded-full text-xs ${
+                        activeTab === tab.id
+                          ? "bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200"
+                          : "bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400"
+                      }`}
+                    >
+                      {tab.count}
+                    </span>
+                  )}
+                </button>
+              ))}
+            </nav>
+          </div>
+
+          {/* Tab Content */}
+          <div className="p-4 sm:p-6">
+            {activeTab === "overview" && (
+              <div
+                role="tabpanel"
+                id="tabpanel-overview"
+                aria-labelledby="tab-overview"
               >
-                <span className="text-sm sm:text-base">{tab.icon}</span>
-                <span className="hidden sm:inline">{tab.label}</span>
-                <span className="sm:hidden">{tab.label.slice(0, 3)}</span>
-                {tab.count !== undefined && (
-                  <span
-                    data-testid={`${tab.id}-count`}
-                    className={`ml-1 py-0.5 px-1.5 sm:px-2 rounded-full text-xs ${
-                      activeTab === tab.id
-                        ? "bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200"
-                        : "bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400"
-                    }`}
-                  >
-                    {tab.count}
-                  </span>
+                <DatabaseProxyOverview
+                  proxies={proxies}
+                  queries={queries}
+                  stats={stats}
+                  getProxyQueries={getProxyQueries}
+                  proxyNotifications={proxyNotifications}
+                  onClearNotifications={onClearNotifications}
+                />
+              </div>
+            )}
+            {activeTab === "proxies" && (
+              <div
+                role="tabpanel"
+                id="tabpanel-proxies"
+                aria-labelledby="tab-proxies"
+              >
+                <DatabaseProxiesTab
+                  proxies={proxies}
+                  showAddProxy={showAddProxy}
+                  setShowAddProxy={setShowAddProxy}
+                  newProxy={newProxy}
+                  setNewProxy={setNewProxy}
+                  editingProxy={editingProxy}
+                  setEditingProxy={setEditingProxy}
+                  onCreateProxy={handleCreateProxy}
+                  onStartProxy={handleStartProxy}
+                  onStopProxy={handleStopProxy}
+                  onUpdateProxy={handleUpdateProxy}
+                  onRemoveProxy={handleRemoveProxy}
+                  getProxyQueries={getProxyQueries}
+                  onClearQueries={handleClearQueries}
+                  // Connection string props
+                  useConnectionString={useConnectionString}
+                  setUseConnectionString={setUseConnectionString}
+                  connectionString={connectionString}
+                  setConnectionString={setConnectionString}
+                  connectionStringError={connectionStringError}
+                  setConnectionStringError={setConnectionStringError}
+                  parsedConnectionDetails={parsedConnectionDetails}
+                  setParsedConnectionDetails={setParsedConnectionDetails}
+                  handleConnectionStringChange={handleConnectionStringChange}
+                  toggleConnectionStringMode={toggleConnectionStringMode}
+                />
+              </div>
+            )}
+            {activeTab === "requests" && (
+              <div
+                role="tabpanel"
+                id="tabpanel-requests"
+                aria-labelledby="tab-requests"
+              >
+                <DatabaseRequestsTab
+                  queries={queries}
+                  proxies={proxies}
+                  onClearQueries={handleClearQueries}
+                />
+              </div>
+            )}
+            {activeTab === "mocks" && (
+              <div
+                role="tabpanel"
+                id="tabpanel-mocks"
+                aria-labelledby="tab-mocks"
+              >
+                {canUseMocks ? (
+                  <DatabaseMocksView
+                    mocks={databaseMocks}
+                    proxies={proxies}
+                    onRefreshMocks={onRefreshDatabaseMocks || loadData}
+                  />
+                ) : (
+                  <div className="bg-gradient-to-br from-blue-50 to-purple-50 border-2 border-dashed border-blue-300 rounded-lg p-8 text-center">
+                    <div className="mx-auto w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mb-4">
+                      <MdCheckCircle className="w-8 h-8 text-blue-600" />
+                    </div>
+                    <h3 className="text-xl font-semibold text-gray-900 mb-2">
+                      Premium Feature: Database Mocks
+                    </h3>
+                    <p className="text-gray-600 mb-6">
+                      Database mock management requires a premium license.
+                      Upgrade to unlock the ability to create, manage, and use
+                      mocks for your database queries.
+                    </p>
+                    <div className="space-y-3">
+                      <p className="text-sm text-gray-500">
+                        Start your free 30-day trial or upgrade to premium
+                      </p>
+                    </div>
+                  </div>
                 )}
-              </button>
-            ))}
-          </nav>
+              </div>
+            )}
+          </div>
         </div>
 
-        {/* Tab Content */}
-        <div className="p-4 sm:p-6">
-          {activeTab === "overview" && (
-            <div
-              role="tabpanel"
-              id="tabpanel-overview"
-              aria-labelledby="tab-overview"
-            >
-              <DatabaseProxyOverview
-                proxies={proxies}
-                queries={queries}
-                stats={stats}
-                getProxyQueries={getProxyQueries}
-              />
-            </div>
-          )}
-          {activeTab === "proxies" && (
-            <div
-              role="tabpanel"
-              id="tabpanel-proxies"
-              aria-labelledby="tab-proxies"
-            >
-              <DatabaseProxiesTab
-                proxies={proxies}
-                showAddProxy={showAddProxy}
-                setShowAddProxy={setShowAddProxy}
-                newProxy={newProxy}
-                setNewProxy={setNewProxy}
-                editingProxy={editingProxy}
-                setEditingProxy={setEditingProxy}
-                onCreateProxy={handleCreateProxy}
-                onStartProxy={handleStartProxy}
-                onStopProxy={handleStopProxy}
-                onUpdateProxy={handleUpdateProxy}
-                onRemoveProxy={handleRemoveProxy}
-                getProxyQueries={getProxyQueries}
-                onClearQueries={handleClearQueries}
-                // Connection string props
-                useConnectionString={useConnectionString}
-                setUseConnectionString={setUseConnectionString}
-                connectionString={connectionString}
-                setConnectionString={setConnectionString}
-                connectionStringError={connectionStringError}
-                setConnectionStringError={setConnectionStringError}
-                parsedConnectionDetails={parsedConnectionDetails}
-                setParsedConnectionDetails={setParsedConnectionDetails}
-                handleConnectionStringChange={handleConnectionStringChange}
-                toggleConnectionStringMode={toggleConnectionStringMode}
-              />
-            </div>
-          )}
-          {activeTab === "requests" && (
-            <div
-              role="tabpanel"
-              id="tabpanel-requests"
-              aria-labelledby="tab-requests"
-            >
-              <DatabaseRequestsTab
-                queries={queries}
-                proxies={proxies}
-                onClearQueries={handleClearQueries}
-              />
-            </div>
-          )}
-          {activeTab === "mocks" && (
-            <div
-              role="tabpanel"
-              id="tabpanel-mocks"
-              aria-labelledby="tab-mocks"
-            >
-              <DatabaseMocksView
-                mocks={databaseMocks}
-                proxies={proxies}
-                onRefreshMocks={onRefreshDatabaseMocks || loadData}
-              />
-            </div>
-          )}
-        </div>
-      </div>
+        {/* Toast notification */}
+        {toast && (
+          <Toast
+            message={toast.message}
+            type={toast.type}
+            show={true}
+            onClose={() => setToast(null)}
+          />
+        )}
 
-      {/* Toast notification */}
-      {toast && (
-        <Toast
-          message={toast.message}
-          type={toast.type}
-          show={true}
-          onClose={() => setToast(null)}
+        {/* Delete Confirmation Modal */}
+        <DeleteConfirmationModal
+          isOpen={deleteModal.isOpen}
+          onClose={() => setDeleteModal({ isOpen: false, proxy: null })}
+          onConfirm={handleConfirmProxyDelete}
+          title="Remove Database Proxy"
+          itemName={deleteModal.proxy?.name}
+          itemType="database-proxy"
+          description={
+            deleteModal.proxy
+              ? `${
+                  deleteModal.proxy.protocol?.toUpperCase() || "DATABASE"
+                } • Port ${deleteModal.proxy.port} → ${
+                  deleteModal.proxy.targetHost
+                }:${deleteModal.proxy.targetPort}`
+              : ""
+          }
         />
-      )}
 
-      {/* Delete Confirmation Modal */}
-      <DeleteConfirmationModal
-        isOpen={deleteModal.isOpen}
-        onClose={() => setDeleteModal({ isOpen: false, proxy: null })}
-        onConfirm={handleConfirmProxyDelete}
-        title="Remove Database Proxy"
-        itemName={deleteModal.proxy?.name}
-        itemType="database-proxy"
-        description={
-          deleteModal.proxy
-            ? `${
-                deleteModal.proxy.protocol?.toUpperCase() || "DATABASE"
-              } • Port ${deleteModal.proxy.port} → ${
-                deleteModal.proxy.targetHost
-              }:${deleteModal.proxy.targetPort}`
-            : ""
-        }
-      />
-
-      {/* Clear Confirmation Modal */}
-      <DeleteConfirmationModal
-        isOpen={clearModal.isOpen}
-        onClose={() =>
-          setClearModal({ isOpen: false, proxyPort: null, proxyName: null })
-        }
-        onConfirm={handleConfirmClearQueries}
-        title="Clear Database Queries"
-        itemName={
-          clearModal.proxyPort
-            ? `${
-                clearModal.proxyName || `Port ${clearModal.proxyPort}`
-              } queries`
-            : "All database queries"
-        }
-        itemType="data"
-        action="clear"
-        consequences={[
-          clearModal.proxyPort
-            ? "All query history for this proxy will be cleared"
-            : "All database query history will be cleared",
-          "This data cannot be recovered",
-          "Active mocks and configurations will not be affected",
-        ]}
-      />
-    </main>
+        {/* Clear Confirmation Modal */}
+        <DeleteConfirmationModal
+          isOpen={clearModal.isOpen}
+          onClose={() =>
+            setClearModal({ isOpen: false, proxyPort: null, proxyName: null })
+          }
+          onConfirm={handleConfirmClearQueries}
+          title="Clear Database Queries"
+          itemName={
+            clearModal.proxyPort
+              ? `${
+                  clearModal.proxyName || `Port ${clearModal.proxyPort}`
+                } queries`
+              : "All database queries"
+          }
+          itemType="data"
+          action="clear"
+          consequences={[
+            clearModal.proxyPort
+              ? "All query history for this proxy will be cleared"
+              : "All database query history will be cleared",
+            "This data cannot be recovered",
+            "Active mocks and configurations will not be affected",
+          ]}
+        />
+      </main>
+    </PremiumFeatureBlock>
   );
 };
 
 // Overview Tab Component
-function DatabaseProxyOverview({ proxies, queries, stats, getProxyQueries }) {
+function DatabaseProxyOverview({
+  proxies,
+  queries,
+  stats,
+  getProxyQueries,
+  proxyNotifications = new Map(),
+  onClearNotifications = () => {},
+}) {
   const queriesArray = Array.isArray(queries) ? queries : [];
   const proxiesArray = Array.isArray(proxies) ? proxies : [];
   const recentQueries = queriesArray.slice(0, 10);
@@ -1104,6 +1168,15 @@ function DatabaseProxyOverview({ proxies, queries, stats, getProxyQueries }) {
                         <h4 className="font-medium text-gray-900 dark:text-white truncate">
                           {proxy.name}
                         </h4>
+                        {proxyNotifications.get(proxy.port) > 0 && (
+                          <button
+                            onClick={() => onClearNotifications(proxy.port)}
+                            className="inline-flex items-center justify-center px-2 py-1 text-xs font-bold leading-none text-white bg-red-600 hover:bg-red-700 rounded-full transition-colors cursor-pointer"
+                            title="Click to clear notifications"
+                          >
+                            ({proxyNotifications.get(proxy.port)})
+                          </button>
+                        )}
                       </div>
                       <p className="text-sm text-gray-600 dark:text-gray-400 truncate">
                         <span
@@ -1251,6 +1324,108 @@ function DatabaseProxiesTab({
   const safeProxies = Array.isArray(proxies) ? proxies : [];
   const [portWarning, setPortWarning] = useState(null);
   const handlePortBlur = createPortBlurHandler(newProxy.port, setPortWarning);
+
+  // UI-only: selected protocol variant (includes version) -> maps to base protocol
+  // Values are like: "postgresql@15", "mysql@8.0", "sqlserver@2022", etc.
+  const [protocolVariant, setProtocolVariant] = useState("postgresql");
+
+  const variantDefaults = {
+    // PostgreSQL
+    postgresql: {
+      base: "postgresql",
+      port: 15432,
+      targetPort: 5432,
+      name: "PostgreSQL Proxy",
+    },
+    "postgresql@15": {
+      base: "postgresql",
+      port: 15432,
+      targetPort: 5432,
+      name: "PostgreSQL 15 Proxy",
+    },
+    "postgresql@13": {
+      base: "postgresql",
+      port: 15432,
+      targetPort: 5432,
+      name: "PostgreSQL 13 Proxy",
+    },
+    // MySQL
+    mysql: {
+      base: "mysql",
+      port: 13306,
+      targetPort: 3306,
+      name: "MySQL Proxy",
+    },
+    "mysql@8.0": {
+      base: "mysql",
+      port: 13306,
+      targetPort: 3306,
+      name: "MySQL 8.0 Proxy",
+    },
+    "mysql@5.7": {
+      base: "mysql",
+      port: 13306,
+      targetPort: 3306,
+      name: "MySQL 5.7 Proxy",
+    },
+    // MongoDB
+    mongodb: {
+      base: "mongodb",
+      port: 37017,
+      targetPort: 27017,
+      name: "MongoDB Proxy",
+    },
+    "mongodb@7.0": {
+      base: "mongodb",
+      port: 37017,
+      targetPort: 27017,
+      name: "MongoDB 7.0 Proxy",
+    },
+    "mongodb@5.0": {
+      base: "mongodb",
+      port: 37017,
+      targetPort: 27017,
+      name: "MongoDB 5.0 Proxy",
+    },
+    // SQL Server
+    sqlserver: {
+      base: "sqlserver",
+      port: 11433,
+      targetPort: 1433,
+      name: "SQL Server Proxy",
+    },
+    "sqlserver@2022": {
+      base: "sqlserver",
+      port: 11433,
+      targetPort: 1433,
+      name: "SQL Server 2022 Proxy",
+    },
+    "sqlserver@2019": {
+      base: "sqlserver",
+      port: 11433,
+      targetPort: 1433,
+      name: "SQL Server 2019 Proxy",
+    },
+    // Redis
+    redis: {
+      base: "redis",
+      port: 16379,
+      targetPort: 6379,
+      name: "Redis Proxy",
+    },
+    "redis@7": {
+      base: "redis",
+      port: 16379,
+      targetPort: 6379,
+      name: "Redis 7 Proxy",
+    },
+    "redis@6": {
+      base: "redis",
+      port: 16379,
+      targetPort: 6379,
+      name: "Redis 6 Proxy",
+    },
+  };
 
   return (
     <div className="space-y-4">
@@ -1514,54 +1689,47 @@ function DatabaseProxiesTab({
                 <select
                   id="proxy-protocol"
                   data-testid="proxy-protocol-select"
-                  value={newProxy.protocol}
+                  value={protocolVariant}
                   onChange={(e) => {
-                    const protocol = e.target.value;
-                    const protocolDefaults = {
-                      postgresql: {
-                        port: 15432,
-                        targetPort: 5432,
-                        name: "PostgreSQL Proxy",
-                      },
-                      mysql: {
-                        port: 13306,
-                        targetPort: 3306,
-                        name: "MySQL Proxy",
-                      },
-                      mongodb: {
-                        port: 37017,
-                        targetPort: 27017,
-                        name: "MongoDB Proxy",
-                      },
-                      sqlserver: {
-                        port: 11433,
-                        targetPort: 1433,
-                        name: "SQL Server Proxy",
-                      },
-                      redis: {
-                        port: 16379,
-                        targetPort: 6379,
-                        name: "Redis Proxy",
-                      },
-                    };
-
+                    const variant = e.target.value;
+                    setProtocolVariant(variant);
+                    const def =
+                      variantDefaults[variant] || variantDefaults["postgresql"];
                     setNewProxy({
                       ...newProxy,
-                      protocol: protocol,
-                      port: protocolDefaults[protocol]?.port || newProxy.port,
-                      targetPort:
-                        protocolDefaults[protocol]?.targetPort ||
-                        newProxy.targetPort,
-                      name: protocolDefaults[protocol]?.name || newProxy.name,
+                      protocol: def.base,
+                      port: def.port,
+                      targetPort: def.targetPort,
+                      name: def.name,
                     });
                   }}
                   className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-800 dark:text-white"
                 >
-                  <option value="postgresql">PostgreSQL</option>
-                  <option value="mysql">MySQL</option>
-                  <option value="mongodb">MongoDB</option>
-                  <option value="sqlserver">SQL Server</option>
-                  <option value="redis">Redis</option>
+                  <optgroup label="PostgreSQL">
+                    <option value="postgresql@15">PostgreSQL › 15</option>
+                    <option value="postgresql@13">PostgreSQL › 13</option>
+                    <option value="postgresql">PostgreSQL (Any)</option>
+                  </optgroup>
+                  <optgroup label="MySQL">
+                    <option value="mysql@8.0">MySQL › 8.0</option>
+                    <option value="mysql@5.7">MySQL › 5.7</option>
+                    <option value="mysql">MySQL (Any)</option>
+                  </optgroup>
+                  <optgroup label="SQL Server">
+                    <option value="sqlserver@2022">SQL Server › 2022</option>
+                    <option value="sqlserver@2019">SQL Server › 2019</option>
+                    <option value="sqlserver">SQL Server (Any)</option>
+                  </optgroup>
+                  <optgroup label="MongoDB">
+                    <option value="mongodb@7.0">MongoDB › 7.0</option>
+                    <option value="mongodb@5.0">MongoDB › 5.0</option>
+                    <option value="mongodb">MongoDB (Any)</option>
+                  </optgroup>
+                  <optgroup label="Redis">
+                    <option value="redis@7">Redis › 7</option>
+                    <option value="redis@6">Redis › 6</option>
+                    <option value="redis">Redis (Any)</option>
+                  </optgroup>
                 </select>
               </div>
               <div>

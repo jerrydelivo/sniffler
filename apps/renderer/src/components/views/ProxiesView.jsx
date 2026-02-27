@@ -3,6 +3,7 @@ import NotificationModal from "../modals/NotificationModal";
 import ConfirmationModal from "../modals/ConfirmationModal";
 import { getSuggestedPortsWithDescriptions } from "../../utils/portSuggestions";
 import { createPortBlurHandler } from "../../utils/portHandlers";
+import { ReliableInput } from "../common/ReliableInput";
 
 function ProxiesView({
   proxies = [],
@@ -12,6 +13,9 @@ function ProxiesView({
   onEnableProxy,
   onRestartAll,
   isCreationMode = false,
+  proxyNotifications = new Map(),
+  onClearNotifications = () => {},
+  onRefresh = () => {},
 }) {
   const [showAddForm, setShowAddForm] = useState(isCreationMode);
   const [newProxyPort, setNewProxyPort] = useState("");
@@ -20,7 +24,12 @@ function ProxiesView({
   const [newTargetPort, setNewTargetPort] = useState("3000");
   const [portWarning, setPortWarning] = useState(null);
   const [editingProxy, setEditingProxy] = useState(null);
-  const [editForm, setEditForm] = useState({ name: "", port: "" });
+  const [editForm, setEditForm] = useState({
+    name: "",
+    port: "",
+    targetHost: "",
+    targetPort: "",
+  });
   const [testingConnection, setTestingConnection] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState(null);
   const [showTargetPortSuggestions, setShowTargetPortSuggestions] =
@@ -174,12 +183,22 @@ function ProxiesView({
 
   const startEditing = (proxy) => {
     setEditingProxy(proxy.port);
-    setEditForm({ name: proxy.name, port: proxy.port.toString() });
+    setEditForm({
+      name: proxy.name,
+      port: proxy.port.toString(),
+      targetHost: proxy.targetHost || "localhost",
+      targetPort: (proxy.targetPort || 3000).toString(),
+    });
   };
 
   const cancelEditing = () => {
     setEditingProxy(null);
-    setEditForm({ name: "", port: "" });
+    setEditForm({
+      name: "",
+      port: "",
+      targetHost: "",
+      targetPort: "",
+    });
   };
 
   const saveProxyChanges = async (originalPort) => {
@@ -193,6 +212,30 @@ function ProxiesView({
       showNotification(
         "Invalid Port",
         "Port must be a number between 1 and 65535",
+        "error"
+      );
+      return;
+    }
+
+    const targetPort = parseInt(editForm.targetPort);
+    if (isNaN(targetPort) || targetPort < 1 || targetPort > 65535) {
+      showNotification(
+        "Invalid Target Port",
+        "Target port must be a number between 1 and 65535",
+        "error"
+      );
+      return;
+    }
+
+    // Validate to prevent circular proxy configuration
+    if (
+      (editForm.targetHost === "localhost" ||
+        editForm.targetHost === "127.0.0.1") &&
+      targetPort === newPort
+    ) {
+      showNotification(
+        "Invalid Configuration",
+        `Cannot target ${editForm.targetHost}:${targetPort}. This would create an infinite loop.`,
         "error"
       );
       return;
@@ -213,16 +256,29 @@ function ProxiesView({
         // Stop the original proxy
         await onStopProxy(originalPort);
 
-        // Start new proxy with new port and name
-        const result = await onStartProxy(newPort, editForm.name.trim());
+        // Start new proxy with all new configuration
+        const result = await onStartProxy(
+          newPort,
+          editForm.name.trim(),
+          editForm.targetHost.trim(),
+          targetPort
+        );
         if (!result.success) {
           showNotification(
             "Proxy Update Failed",
             `Failed to start proxy on new port: ${result.error}`,
             "error"
           );
-          // Try to restart on original port
-          await onStartProxy(originalPort, editForm.name.trim());
+          // Try to restart on original port with original config
+          const originalProxy = proxies.find((p) => p.port === originalPort);
+          if (originalProxy) {
+            await onStartProxy(
+              originalPort,
+              originalProxy.name,
+              originalProxy.targetHost || "localhost",
+              originalProxy.targetPort || 3000
+            );
+          }
           return;
         }
       } catch (error) {
@@ -234,25 +290,41 @@ function ProxiesView({
         return;
       }
     } else {
-      // Only name changed, update via IPC
-      if (window.electronAPI && window.electronAPI.updateProxyName) {
-        const result = await window.electronAPI.updateProxyName(
+      // Port didn't change, update configuration via IPC
+      if (window.electronAPI && window.electronAPI.updateProxyConfig) {
+        const updates = {
+          name: editForm.name.trim(),
+          targetHost: editForm.targetHost.trim(),
+          targetPort: targetPort,
+        };
+
+        const result = await window.electronAPI.updateProxyConfig(
           originalPort,
-          editForm.name.trim()
+          updates
         );
         if (!result.success) {
           showNotification(
             "Proxy Update Failed",
-            "Failed to update proxy name: " + result.error,
+            "Failed to update proxy: " + result.error,
             "error"
           );
           return;
+        }
+
+        // Trigger a reload of proxy data in the parent component
+        if (onRefresh) {
+          await onRefresh();
         }
       }
     }
 
     setEditingProxy(null);
-    setEditForm({ name: "", port: "" });
+    setEditForm({
+      name: "",
+      port: "",
+      targetHost: "",
+      targetPort: "",
+    });
   };
 
   const disableProxy = async (port) => {
@@ -389,13 +461,12 @@ function ProxiesView({
               >
                 Project Name
               </label>
-              <input
+              <ReliableInput
                 id="projectName"
-                type="text"
                 value={newProxyName}
                 onChange={(e) => setNewProxyName(e.target.value)}
                 placeholder="e.g., My API Project"
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
+                fullWidth
                 required
               />
             </div>
@@ -592,8 +663,21 @@ function ProxiesView({
               <button
                 type="button"
                 onClick={() => {
-                  setShowAddForm(false);
-                  setPortWarning(null);
+                  // If we're in initial creation mode (first run / no projects wizard)
+                  // don't hide the form entirely or the user will see an empty screen.
+                  // Instead, just reset the form fields. In normal (non-creation) mode
+                  // we preserve the old behavior of collapsing the form.
+                  if (isCreationMode) {
+                    setNewProxyPort("");
+                    setNewProxyName("");
+                    setNewTargetHost("localhost");
+                    setNewTargetPort("3000");
+                    setConnectionStatus(null);
+                    setPortWarning(null);
+                  } else {
+                    setShowAddForm(false);
+                    setPortWarning(null);
+                  }
                 }}
                 className="bg-gray-300 dark:bg-gray-600 text-gray-700 dark:text-gray-300 px-3 sm:px-4 py-2 rounded-md hover:bg-gray-400 dark:hover:bg-gray-500 text-sm"
               >
@@ -632,7 +716,7 @@ function ProxiesView({
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                        Port
+                        Listen Port
                       </label>
                       <input
                         type="number"
@@ -646,6 +730,70 @@ function ProxiesView({
                       />
                     </div>
                   </div>
+
+                  {/* Target Configuration - Only show when proxy is disabled */}
+                  {proxy.disabled && (
+                    <div>
+                      <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+                        Target Configuration
+                        <span className="ml-2 text-xs text-blue-600 bg-blue-100 px-2 py-1 rounded">
+                          Editable when disabled
+                        </span>
+                      </h4>
+                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                            Target Host
+                          </label>
+                          <input
+                            type="text"
+                            value={editForm.targetHost}
+                            onChange={(e) =>
+                              setEditForm({
+                                ...editForm,
+                                targetHost: e.target.value,
+                              })
+                            }
+                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
+                            placeholder="localhost"
+                          />
+                          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                            Hostname where your server is running
+                          </p>
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                            Target Port
+                          </label>
+                          <input
+                            type="number"
+                            value={editForm.targetPort}
+                            onChange={(e) =>
+                              setEditForm({
+                                ...editForm,
+                                targetPort: e.target.value,
+                              })
+                            }
+                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                            placeholder="3000"
+                            min="1"
+                            max="65535"
+                          />
+                          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                            Port your actual server runs on
+                          </p>
+                          {editForm.targetHost === "localhost" &&
+                            editForm.targetPort === editForm.port && (
+                              <p className="text-xs text-red-500 mt-1">
+                                ⚠️ Target port cannot be the same as listen port
+                                (would create infinite loop)
+                              </p>
+                            )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
                   <div className="flex flex-col sm:flex-row gap-2">
                     <button
                       onClick={() => saveProxyChanges(proxy.port)}
@@ -666,9 +814,20 @@ function ProxiesView({
                 <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
                   <div className="flex-1 min-w-0">
                     <div>
-                      <h3 className="text-base sm:text-lg font-semibold text-gray-900 dark:text-white mb-2">
-                        {proxy.name}
-                      </h3>
+                      <div className="flex items-center gap-2 mb-2">
+                        <h3 className="text-base sm:text-lg font-semibold text-gray-900 dark:text-white">
+                          {proxy.name}
+                        </h3>
+                        {proxyNotifications.get(proxy.port) > 0 && (
+                          <button
+                            onClick={() => onClearNotifications(proxy.port)}
+                            className="inline-flex items-center justify-center px-2 py-1 text-xs font-bold leading-none text-white bg-red-600 hover:bg-red-700 rounded-full transition-colors cursor-pointer"
+                            title="Click to clear notifications"
+                          >
+                            ({proxyNotifications.get(proxy.port)})
+                          </button>
+                        )}
+                      </div>
                       <div className="text-gray-600 dark:text-gray-400 space-y-2">
                         <div className="flex flex-col sm:flex-row sm:items-center gap-2">
                           <span className="font-medium text-sm">Listen:</span>
@@ -677,7 +836,14 @@ function ProxiesView({
                           </span>
                         </div>
                         <div className="flex flex-col sm:flex-row sm:items-center gap-2">
-                          <span className="font-medium text-sm">Target:</span>
+                          <span className="font-medium text-sm">
+                            Target:
+                            {proxy.disabled && (
+                              <span className="ml-1 text-xs text-blue-600">
+                                (editable)
+                              </span>
+                            )}
+                          </span>
                           <span className="bg-green-100 dark:bg-green-900 px-2 py-1 rounded text-xs sm:text-sm break-all">
                             {proxy.targetHost || "localhost"}:
                             {proxy.targetPort || 3000}
